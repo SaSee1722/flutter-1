@@ -9,6 +9,12 @@ class Message {
   final String? attachmentType; // 'image', 'video', 'audio'
   final Map<String, String>? reactions; // { userId: emoji }
 
+  // New media fields
+  final String? mediaUrl;
+  final String? mediaType; // 'image', 'video', 'document', 'audio', 'voice'
+  final String? mediaName;
+  final int? mediaSize;
+
   Message({
     required this.id,
     required this.roomId,
@@ -19,6 +25,10 @@ class Message {
     this.attachmentUrl,
     this.attachmentType,
     this.reactions,
+    this.mediaUrl,
+    this.mediaType,
+    this.mediaName,
+    this.mediaSize,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -37,6 +47,10 @@ class Message {
       reactions: json['reactions'] != null
           ? Map<String, String>.from(json['reactions'])
           : null,
+      mediaUrl: json['media_url'],
+      mediaType: json['media_type'],
+      mediaName: json['media_name'],
+      mediaSize: json['media_size'],
     );
   }
 
@@ -52,6 +66,10 @@ class Message {
       if (attachmentUrl != null) 'attachment_url': attachmentUrl,
       if (attachmentType != null) 'attachment_type': attachmentType,
       if (reactions != null) 'reactions': reactions,
+      if (mediaUrl != null) 'media_url': mediaUrl,
+      if (mediaType != null) 'media_type': mediaType,
+      if (mediaName != null) 'media_name': mediaName,
+      if (mediaSize != null) 'media_size': mediaSize,
     };
   }
 }

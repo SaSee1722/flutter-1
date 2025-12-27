@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -14,11 +15,14 @@ import 'package:gossip/core/di/injection_container.dart';
 import 'package:gossip/features/auth/presentation/pages/pin_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String roomId;
@@ -54,7 +58,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   final ImagePicker _imagePicker = ImagePicker();
   final AudioRecorder _audioRecorder = AudioRecorder();
   bool _isRecording = false;
-  String? _recordingPath;
 
   @override
   void initState() {
@@ -309,16 +312,64 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final XFile? image = await _imagePicker.pickImage(source: source);
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+
       if (image != null) {
-        // TODO: Upload image to Supabase storage and send message with image URL
+        // Show loading
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Image selected: ${image.name}')),
+          const SnackBar(content: Text('Uploading image...')),
+        );
+
+        // Read file bytes
+        final bytes = await image.readAsBytes();
+        final fileExt = image.path.split('.').last;
+        final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+        final userId = Supabase.instance.client.auth.currentUser?.id;
+
+        if (userId == null) throw Exception('User not authenticated');
+
+        // Upload to Supabase Storage
+        final filePath = '$userId/$fileName';
+        await Supabase.instance.client.storage
+            .from('chat-media')
+            .uploadBinary(filePath, bytes);
+
+        // Get public URL
+        final publicUrl = Supabase.instance.client.storage
+            .from('chat-media')
+            .getPublicUrl(filePath);
+
+        // Send message with image
+        final message = Message(
+          id: '',
+          roomId: widget.roomId,
+          userId: userId,
+          content: '📷 Image',
+          status: MessageStatus.sending,
+          createdAt: DateTime.now(),
+          mediaUrl: publicUrl,
+          mediaType: 'image',
+          mediaName: image.name,
+          mediaSize: bytes.length,
+        );
+
+        context.read<ChatBloc>().add(SendMessageRequested(message));
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Image sent!')),
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error picking image: $e')),
+        SnackBar(content: Text('Error uploading image: $e')),
       );
     }
   }
@@ -327,15 +378,53 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     try {
       final XFile? video =
           await _imagePicker.pickVideo(source: ImageSource.gallery);
+
       if (video != null) {
-        // TODO: Upload video to Supabase storage and send message with video URL
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Video selected: ${video.name}')),
+          const SnackBar(content: Text('Uploading video...')),
+        );
+
+        final bytes = await video.readAsBytes();
+        final userId = Supabase.instance.client.auth.currentUser?.id;
+        if (userId == null) throw Exception('User not authenticated');
+
+        final fileExt = video.path.split('.').last;
+        final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+        final filePath = '$userId/$fileName';
+
+        await Supabase.instance.client.storage
+            .from('chat-media')
+            .uploadBinary(filePath, bytes);
+
+        final publicUrl = Supabase.instance.client.storage
+            .from('chat-media')
+            .getPublicUrl(filePath);
+
+        final message = Message(
+          id: '',
+          roomId: widget.roomId,
+          userId: userId,
+          content: '🎥 Video',
+          status: MessageStatus.sending,
+          createdAt: DateTime.now(),
+          mediaUrl: publicUrl,
+          mediaType: 'video',
+          mediaName: video.name,
+          mediaSize: bytes.length,
+        );
+
+        context.read<ChatBloc>().add(SendMessageRequested(message));
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Video sent!')),
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error picking video: $e')),
+        SnackBar(content: Text('Error uploading video: $e')),
       );
     }
   }
@@ -347,15 +436,53 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
         allowedExtensions: ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'ppt', 'pptx'],
       );
 
-      if (result != null) {
-        // TODO: Upload file to Supabase storage and send message with file URL
+      if (result != null && result.files.first.bytes != null) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('File selected: ${result.files.first.name}')),
+          const SnackBar(content: Text('Uploading document...')),
+        );
+
+        final file = result.files.first;
+        final bytes = file.bytes!;
+        final userId = Supabase.instance.client.auth.currentUser?.id;
+        if (userId == null) throw Exception('User not authenticated');
+
+        final fileName = file.name;
+        final filePath =
+            '$userId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
+
+        await Supabase.instance.client.storage
+            .from('chat-documents')
+            .uploadBinary(filePath, bytes);
+
+        final publicUrl = Supabase.instance.client.storage
+            .from('chat-documents')
+            .getPublicUrl(filePath);
+
+        final message = Message(
+          id: '',
+          roomId: widget.roomId,
+          userId: userId,
+          content: '📄 ${file.name}',
+          status: MessageStatus.sending,
+          createdAt: DateTime.now(),
+          mediaUrl: publicUrl,
+          mediaType: 'document',
+          mediaName: file.name,
+          mediaSize: bytes.length,
+        );
+
+        context.read<ChatBloc>().add(SendMessageRequested(message));
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Document sent!')),
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error picking file: $e')),
+        SnackBar(content: Text('Error uploading document: $e')),
       );
     }
   }
@@ -366,15 +493,53 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
         type: FileType.audio,
       );
 
-      if (result != null) {
-        // TODO: Upload audio to Supabase storage and send message with audio URL
+      if (result != null && result.files.first.bytes != null) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Audio selected: ${result.files.first.name}')),
+          const SnackBar(content: Text('Uploading audio...')),
+        );
+
+        final file = result.files.first;
+        final bytes = file.bytes!;
+        final userId = Supabase.instance.client.auth.currentUser?.id;
+        if (userId == null) throw Exception('User not authenticated');
+
+        final fileName = file.name;
+        final filePath =
+            '$userId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
+
+        await Supabase.instance.client.storage
+            .from('chat-audio')
+            .uploadBinary(filePath, bytes);
+
+        final publicUrl = Supabase.instance.client.storage
+            .from('chat-audio')
+            .getPublicUrl(filePath);
+
+        final message = Message(
+          id: '',
+          roomId: widget.roomId,
+          userId: userId,
+          content: '🎵 ${file.name}',
+          status: MessageStatus.sending,
+          createdAt: DateTime.now(),
+          mediaUrl: publicUrl,
+          mediaType: 'audio',
+          mediaName: file.name,
+          mediaSize: bytes.length,
+        );
+
+        context.read<ChatBloc>().add(SendMessageRequested(message));
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Audio sent!')),
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error picking audio: $e')),
+        SnackBar(content: Text('Error uploading audio: $e')),
       );
     }
   }
@@ -387,16 +552,60 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
         if (path != null) {
           setState(() {
             _isRecording = false;
-            _recordingPath = path;
           });
-          // TODO: Upload voice message to Supabase storage and send message
+
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Voice message recorded')),
+            const SnackBar(content: Text('Uploading voice message...')),
+          );
+
+          // Read the recorded file
+          final file = File(path);
+          final bytes = await file.readAsBytes();
+          final userId = Supabase.instance.client.auth.currentUser?.id;
+          if (userId == null) throw Exception('User not authenticated');
+
+          final fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+          final filePath = '$userId/$fileName';
+
+          await Supabase.instance.client.storage
+              .from('chat-audio')
+              .uploadBinary(filePath, bytes);
+
+          final publicUrl = Supabase.instance.client.storage
+              .from('chat-audio')
+              .getPublicUrl(filePath);
+
+          final message = Message(
+            id: '',
+            roomId: widget.roomId,
+            userId: userId,
+            content: '🎤 Voice message',
+            status: MessageStatus.sending,
+            createdAt: DateTime.now(),
+            mediaUrl: publicUrl,
+            mediaType: 'voice',
+            mediaName: fileName,
+            mediaSize: bytes.length,
+          );
+
+          context.read<ChatBloc>().add(SendMessageRequested(message));
+
+          // Delete temp file
+          await file.delete();
+
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Voice message sent!')),
           );
         }
       } catch (e) {
+        setState(() {
+          _isRecording = false;
+        });
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error stopping recording: $e')),
+          SnackBar(content: Text('Error uploading voice message: $e')),
         );
       }
     } else {
@@ -1031,6 +1240,10 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (widget.message.mediaUrl != null) ...[
+                        _buildMediaContent(),
+                        const SizedBox(height: 8),
+                      ],
                       MarkdownBody(
                         data: widget.message.content,
                         styleSheet: MarkdownStyleSheet(
@@ -1077,6 +1290,120 @@ class _MessageBubbleState extends State<_MessageBubble> {
         ),
       ),
     );
+  }
+
+  Widget _buildMediaContent() {
+    final mediaType = widget.message.mediaType;
+    final mediaUrl = widget.message.mediaUrl!;
+
+    if (mediaType == 'image') {
+      return GestureDetector(
+        onTap: () => _openUrl(mediaUrl),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CachedNetworkImage(
+                imageUrl: mediaUrl,
+                placeholder: (context, url) => Container(
+                  height: 200,
+                  width: double.infinity,
+                  color: Colors.white10,
+                  child: const Center(
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                ),
+                errorWidget: (context, url, error) => const Icon(Icons.error),
+                fit: BoxFit.cover,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (mediaType == 'video') {
+      return GestureDetector(
+        onTap: () => _openUrl(mediaUrl),
+        child: Container(
+          height: 200,
+          decoration: BoxDecoration(
+            color: Colors.black26,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              const Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+              Positioned(
+                bottom: 8,
+                right: 8,
+                child: Text(
+                  widget.message.mediaName ?? 'Video',
+                  style: const TextStyle(color: Colors.white, fontSize: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (mediaType == 'document') {
+      return GestureDetector(
+        onTap: () => _openUrl(mediaUrl),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.insert_drive_file, color: Colors.white70),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.message.mediaName ?? 'Document',
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (widget.message.mediaSize != null)
+                      Text(
+                        '${(widget.message.mediaSize! / 1024).toStringAsFixed(1)} KB',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 10),
+                      ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.download, color: Colors.white38, size: 18),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (mediaType == 'voice' || mediaType == 'audio') {
+      return _AudioMessagePlayer(url: mediaUrl, isMe: widget.isMe);
+    }
+
+    return const SizedBox.shrink();
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open file')),
+        );
+      }
+    }
   }
 
   void _showReactionMenu() {
@@ -1131,6 +1458,146 @@ class _MessageBubbleState extends State<_MessageBubble> {
       case MessageStatus.read:
         return const Icon(Icons.done_all, size: 12, color: tickColor);
     }
+  }
+}
+
+class _AudioMessagePlayer extends StatefulWidget {
+  final String url;
+  final bool isMe;
+
+  const _AudioMessagePlayer({required this.url, required this.isMe});
+
+  @override
+  State<_AudioMessagePlayer> createState() => _AudioMessagePlayerState();
+}
+
+class _AudioMessagePlayerState extends State<_AudioMessagePlayer> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isPlaying = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPlayer();
+  }
+
+  void _initPlayer() {
+    _audioPlayer.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _audioPlayer.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+    _audioPlayer.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = false;
+          _position = Duration.zero;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlay() async {
+    if (_isPlaying) {
+      await _audioPlayer.pause();
+    } else {
+      await _audioPlayer.play(UrlSource(widget.url));
+    }
+    if (mounted) setState(() => _isPlaying = !_isPlaying);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.isMe ? Colors.black : Colors.white;
+
+    return Container(
+      width: 200,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            icon: Icon(
+              _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+              color: color,
+              size: 32,
+            ),
+            onPressed: _togglePlay,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2,
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 4),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 10),
+                    activeTrackColor: color,
+                    inactiveTrackColor: color.withValues(alpha: 0.2),
+                    thumbColor: color,
+                  ),
+                  child: Slider(
+                    min: 0,
+                    max: _duration.inMilliseconds.toDouble() > 0
+                        ? _duration.inMilliseconds.toDouble()
+                        : 1.0,
+                    value: _position.inMilliseconds.toDouble().clamp(
+                        0.0,
+                        _duration.inMilliseconds.toDouble() > 0
+                            ? _duration.inMilliseconds.toDouble()
+                            : 1.0),
+                    onChanged: (value) async {
+                      await _audioPlayer
+                          .seek(Duration(milliseconds: value.toInt()));
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _formatDuration(_position),
+                        style: TextStyle(
+                            color: color.withValues(alpha: 0.6), fontSize: 10),
+                      ),
+                      Text(
+                        _formatDuration(_duration),
+                        style: TextStyle(
+                            color: color.withValues(alpha: 0.6), fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, "0");
+    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
+    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
+    return "$twoDigitMinutes:$twoDigitSeconds";
   }
 }
 
