@@ -287,10 +287,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 
   Widget _buildInputArea() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0A0A0A),
-      ),
+      color: const Color(0xFF000000),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: Column(
         children: [
           if (_replyMessage != null)
@@ -339,36 +337,34 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
               ),
             ).animate().fadeIn().slideY(begin: 0.2, end: 0),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
                 child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1A1A1A),
+                    color: const Color(0xFF1C1C1E),
                     borderRadius: BorderRadius.circular(30),
                   ),
                   child: Row(
                     children: [
                       IconButton(
                         icon: const Icon(Icons.emoji_emotions_outlined,
-                            color: Color(0xFF666666), size: 22),
+                            color: Color(0xFFB0B0B0), size: 22),
                         onPressed: () {
                           // TODO: Show emoji picker
                         },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
                       ),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
                           controller: _messageController,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                          ),
+                          style: const TextStyle(color: Colors.white),
+                          cursorColor: Colors.white,
                           decoration: const InputDecoration(
-                            hintText: 'Type a gossip...',
-                            hintStyle: TextStyle(
-                              color: Color(0xFF666666),
-                              fontSize: 15,
-                            ),
+                            hintText: "Type a gossip...",
+                            hintStyle: TextStyle(color: Color(0xFF8E8E93)),
                             border: InputBorder.none,
                             contentPadding: EdgeInsets.symmetric(vertical: 12),
                           ),
@@ -379,26 +375,32 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                       ),
                       IconButton(
                         icon: const Icon(Icons.attach_file,
-                            color: Color(0xFF666666), size: 22),
+                            color: Color(0xFFB0B0B0), size: 22),
                         onPressed: () {
                           // TODO: Show attachment options
                         },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
                       ),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               GestureDetector(
                 onTap: _sendMessage,
                 child: Container(
-                  padding: const EdgeInsets.all(14),
+                  height: 44,
+                  width: 44,
                   decoration: const BoxDecoration(
-                    color: Color(0xFF1A1A1A),
+                    color: Color(0xFF2C2C2E),
                     shape: BoxShape.circle,
                   ),
-                  child:
-                      const Icon(Icons.mic, color: Color(0xFF666666), size: 24),
+                  child: const Icon(
+                    Icons.mic,
+                    color: Colors.white,
+                    size: 22,
+                  ),
                 ),
               ),
             ],
