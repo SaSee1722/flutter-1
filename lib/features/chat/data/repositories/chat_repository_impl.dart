@@ -103,19 +103,11 @@ class SupabaseChatRepository implements ChatRepository {
               .select('id')
               .eq('room_id', item['id'])
               .neq('user_id', user.id)
-              .or('status.eq.sent,status.eq.delivered')
+              .eq('status', 'sent')
         ]);
 
         final lastMsgData = results[0] as Map<String, dynamic>?;
-        final unreadResponse = results[1] as List<dynamic>;
-
-        // Mark last message as delivered if we just received it in the room list
-        if (lastMsgData != null &&
-            lastMsgData['id'] != null &&
-            lastMsgData['status'] == 'sent' &&
-            lastMsgData['user_id'] != user.id) {
-          markAsDelivered(lastMsgData['id']);
-        }
+        final unreadMessages = results[1] as List<dynamic>;
 
         return ChatRoom(
           id: item['id'],
@@ -127,7 +119,7 @@ class SupabaseChatRepository implements ChatRepository {
               ? DateFormat('HH:mm')
                   .format(DateTime.parse(lastMsgData['created_at']).toLocal())
               : null,
-          unreadCount: unreadResponse.length,
+          unreadCount: unreadMessages.length,
           isGroup: false,
           lastMessageTime: lastMsgData != null
               ? DateTime.parse(lastMsgData['created_at'])
