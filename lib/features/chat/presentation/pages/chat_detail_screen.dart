@@ -289,7 +289,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       decoration: const BoxDecoration(
-        color: Colors.black,
+        color: Color(0xFF0A0A0A),
       ),
       child: Column(
         children: [
