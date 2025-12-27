@@ -406,6 +406,7 @@ class _GroupListItem extends StatelessWidget {
                 roomId: group['id'],
                 chatName: group['name'] ?? 'Group Chat',
                 avatarUrl: group['avatar_url'],
+                isGroup: true,
               ),
             ),
           );

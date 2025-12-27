@@ -21,6 +21,7 @@ class ChatDetailScreen extends StatefulWidget {
   final String chatName;
   final String? avatarUrl;
   final String? currentUserGender;
+  final bool isGroup;
 
   const ChatDetailScreen({
     super.key,
@@ -28,6 +29,7 @@ class ChatDetailScreen extends StatefulWidget {
     required this.chatName,
     this.avatarUrl,
     this.currentUserGender,
+    this.isGroup = false,
   });
 
   @override
@@ -413,6 +415,143 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   }
 
   void _showGossipActions() {
+    if (widget.isGroup) {
+      _showGroupInfo();
+    } else {
+      _showUserActions();
+    }
+  }
+
+  void _showGroupInfo() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.7,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0A0A0A),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('GROUP INFO',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.2)),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white54),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            Center(
+              child: CircleAvatar(
+                radius: 50,
+                backgroundColor: GossipColors.primary.withValues(alpha: 0.2),
+                backgroundImage: widget.avatarUrl != null
+                    ? NetworkImage(widget.avatarUrl!)
+                    : null,
+                child: widget.avatarUrl == null
+                    ? const Icon(Icons.group,
+                        size: 50, color: GossipColors.primary)
+                    : null,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Center(
+              child: Text(
+                widget.chatName,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'MEMBERS',
+              style: TextStyle(
+                color: GossipColors.textDim,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: FutureBuilder<List<dynamic>>(
+                future: Supabase.instance.client
+                    .from('group_members')
+                    .select('user_id, role')
+                    .eq('room_id', widget.roomId),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final members = snapshot.data!;
+                  return ListView.builder(
+                    itemCount: members.length,
+                    itemBuilder: (context, index) {
+                      final member = members[index];
+                      final isAdmin = member['role'] == 'admin';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor:
+                              GossipColors.primary.withValues(alpha: 0.2),
+                          child: const Icon(Icons.person,
+                              color: GossipColors.primary),
+                        ),
+                        title: Text(
+                          member['user_id'],
+                          style: const TextStyle(color: Colors.white),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: isAdmin
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: GossipColors.primary
+                                      .withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text(
+                                  'ADMIN',
+                                  style: TextStyle(
+                                    color: GossipColors.primary,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              )
+                            : null,
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showUserActions() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
