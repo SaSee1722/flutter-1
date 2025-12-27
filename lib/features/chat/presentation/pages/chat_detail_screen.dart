@@ -11,10 +11,14 @@ import 'package:gossip/features/chat/presentation/bloc/chat_event.dart';
 import 'package:gossip/features/chat/presentation/bloc/chat_state.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
 import 'package:gossip/core/di/injection_container.dart';
-import 'package:gossip/shared/widgets/glass_card.dart';
 import 'package:gossip/features/auth/presentation/pages/pin_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String roomId;
@@ -44,6 +48,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   String? _typingUserName;
   StreamSubscription? _typingSubscription;
   Timer? _typingTimer;
+
+  // Media & Emoji features
+  bool _showEmojiPicker = false;
+  final ImagePicker _imagePicker = ImagePicker();
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  String? _recordingPath;
 
   @override
   void initState() {
@@ -285,6 +296,223 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     );
   }
 
+  // Media handling methods
+  void _toggleEmojiPicker() {
+    setState(() {
+      _showEmojiPicker = !_showEmojiPicker;
+    });
+  }
+
+  void _onEmojiSelected(Emoji emoji) {
+    _messageController.text += emoji.emoji;
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(source: source);
+      if (image != null) {
+        // TODO: Upload image to Supabase storage and send message with image URL
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Image selected: ${image.name}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error picking image: $e')),
+      );
+    }
+  }
+
+  Future<void> _pickVideo() async {
+    try {
+      final XFile? video =
+          await _imagePicker.pickVideo(source: ImageSource.gallery);
+      if (video != null) {
+        // TODO: Upload video to Supabase storage and send message with video URL
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Video selected: ${video.name}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error picking video: $e')),
+      );
+    }
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'txt', 'xlsx', 'ppt', 'pptx'],
+      );
+
+      if (result != null) {
+        // TODO: Upload file to Supabase storage and send message with file URL
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('File selected: ${result.files.first.name}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error picking file: $e')),
+      );
+    }
+  }
+
+  Future<void> _pickAudio() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.audio,
+      );
+
+      if (result != null) {
+        // TODO: Upload audio to Supabase storage and send message with audio URL
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Audio selected: ${result.files.first.name}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error picking audio: $e')),
+      );
+    }
+  }
+
+  Future<void> _toggleVoiceRecording() async {
+    if (_isRecording) {
+      // Stop recording
+      try {
+        final path = await _audioRecorder.stop();
+        if (path != null) {
+          setState(() {
+            _isRecording = false;
+            _recordingPath = path;
+          });
+          // TODO: Upload voice message to Supabase storage and send message
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Voice message recorded')),
+          );
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error stopping recording: $e')),
+        );
+      }
+    } else {
+      // Start recording
+      try {
+        if (await _audioRecorder.hasPermission()) {
+          final directory = await getTemporaryDirectory();
+          final path =
+              '${directory.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+          await _audioRecorder.start(
+            const RecordConfig(encoder: AudioEncoder.aacLc),
+            path: path,
+          );
+
+          setState(() {
+            _isRecording = true;
+          });
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission denied')),
+          );
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error starting recording: $e')),
+        );
+      }
+    }
+  }
+
+  void _showAttachmentOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Send Attachment',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _AttachmentOption(
+                  icon: Icons.photo_library,
+                  label: 'Gallery',
+                  color: Colors.purple,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickImage(ImageSource.gallery);
+                  },
+                ),
+                _AttachmentOption(
+                  icon: Icons.camera_alt,
+                  label: 'Camera',
+                  color: Colors.pink,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickImage(ImageSource.camera);
+                  },
+                ),
+                _AttachmentOption(
+                  icon: Icons.videocam,
+                  label: 'Video',
+                  color: Colors.red,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickVideo();
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _AttachmentOption(
+                  icon: Icons.insert_drive_file,
+                  label: 'Document',
+                  color: Colors.blue,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickFile();
+                  },
+                ),
+                _AttachmentOption(
+                  icon: Icons.audiotrack,
+                  label: 'Audio',
+                  color: Colors.orange,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickAudio();
+                  },
+                ),
+                const SizedBox(width: 80), // Placeholder for alignment
+              ],
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildInputArea() {
     return Container(
       color: const Color(0xFF000000),
@@ -350,9 +578,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                       IconButton(
                         icon: const Icon(Icons.emoji_emotions_outlined,
                             color: Color(0xFFB0B0B0), size: 22),
-                        onPressed: () {
-                          // TODO: Show emoji picker
-                        },
+                        onPressed: _toggleEmojiPicker,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -376,9 +602,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                       IconButton(
                         icon: const Icon(Icons.attach_file,
                             color: Color(0xFFB0B0B0), size: 22),
-                        onPressed: () {
-                          // TODO: Show attachment options
-                        },
+                        onPressed: _showAttachmentOptions,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -388,16 +612,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
               ),
               const SizedBox(width: 10),
               GestureDetector(
-                onTap: _sendMessage,
+                onTap: _messageController.text.trim().isNotEmpty
+                    ? _sendMessage
+                    : _toggleVoiceRecording,
                 child: Container(
                   height: 44,
                   width: 44,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF2C2C2E),
+                  decoration: BoxDecoration(
+                    color: _isRecording ? Colors.red : const Color(0xFF2C2C2E),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.mic,
+                  child: Icon(
+                    _messageController.text.trim().isNotEmpty
+                        ? Icons.send
+                        : (_isRecording ? Icons.stop : Icons.mic),
                     color: Colors.white,
                     size: 22,
                   ),
@@ -405,6 +633,28 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
               ),
             ],
           ),
+          // Emoji Picker
+          if (_showEmojiPicker)
+            SizedBox(
+              height: 250,
+              child: EmojiPicker(
+                onEmojiSelected: (category, emoji) {
+                  _onEmojiSelected(emoji);
+                },
+                config: const Config(
+                  height: 250,
+                  checkPlatformCompatibility: true,
+                  emojiViewConfig: EmojiViewConfig(
+                    backgroundColor: Color(0xFF1C1C1E),
+                    columns: 7,
+                    emojiSizeMax: 28,
+                  ),
+                  categoryViewConfig: CategoryViewConfig(
+                    backgroundColor: Color(0xFF1C1C1E),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -941,4 +1191,46 @@ class _TypingIndicator extends StatelessWidget {
   }
 }
 
-// Import added at top
+// Attachment Option Widget
+class _AttachmentOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _AttachmentOption({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 28),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

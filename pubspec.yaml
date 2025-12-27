@@ -61,6 +61,10 @@ dependencies:
   glassmorphism_ui: ^0.3.0
   flutter_animate: ^4.5.2
   shared_preferences: ^2.5.4
+  emoji_picker_flutter: ^3.0.0
+  file_picker: ^8.1.4
+  record: ^5.1.2
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:
