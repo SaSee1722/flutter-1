@@ -103,7 +103,7 @@ class SupabaseChatRepository implements ChatRepository {
               .select('id')
               .eq('room_id', item['id'])
               .neq('user_id', user.id)
-              .neq('status', 'read')
+              .or('status.eq.sent,status.eq.delivered')
         ]);
 
         final lastMsgData = results[0] as Map<String, dynamic>?;
