@@ -129,12 +129,13 @@ class SupabaseChatRepository implements ChatRepository {
 
       rooms.addAll(await Future.wait(futures));
 
-      // Groups (could also be parallelized if needed, but keeping it simple for now)
-      try {
-        final groupData =
-            await _supabase.from('chat_rooms').select().eq('is_group', true);
-        rooms.addAll((groupData as List).map((j) => ChatRoom.fromJson(j)));
-      } catch (_) {}
+      // Groups are NOT included in chat list
+      // They are fetched separately in Groups screen
+      // try {
+      //   final groupData =
+      //       await _supabase.from('chat_rooms').select().eq('is_group', true);
+      //   rooms.addAll((groupData as List).map((j) => ChatRoom.fromJson(j)));
+      // } catch (_) {}
 
       rooms.sort((a, b) {
         final timeA = a.lastMessageTime ?? DateTime(2000);
