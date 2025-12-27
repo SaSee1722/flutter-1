@@ -944,3 +944,5 @@ class _TypingIndicator extends StatelessWidget {
     );
   }
 }
+
+// Import added at top
