@@ -344,7 +344,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2A2A2A),
+                    color: const Color(0xFF1A1A1A),
                     borderRadius: BorderRadius.circular(30),
                   ),
                   child: Row(
@@ -388,13 +388,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               GestureDetector(
                 onTap: _sendMessage,
                 child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2A2A2A),
+                  padding: const EdgeInsets.all(14),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1A1A1A),
                     shape: BoxShape.circle,
                   ),
                   child:
