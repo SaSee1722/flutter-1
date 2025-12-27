@@ -288,15 +288,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   Widget _buildInputArea() {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: Colors.black,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
       ),
       child: Column(
         children: [
@@ -352,15 +345,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                 child: Container(
                   decoration: BoxDecoration(
                     color: const Color(0xFF2A2A2A),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      width: 1,
-                    ),
+                    borderRadius: BorderRadius.circular(30),
                   ),
                   child: Row(
                     children: [
-                      const SizedBox(width: 16),
+                      IconButton(
+                        icon: const Icon(Icons.emoji_emotions_outlined,
+                            color: Color(0xFF666666), size: 22),
+                        onPressed: () {
+                          // TODO: Show emoji picker
+                        },
+                      ),
                       Expanded(
                         child: TextField(
                           controller: _messageController,
@@ -369,7 +364,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                             fontSize: 15,
                           ),
                           decoration: const InputDecoration(
-                            hintText: 'Type a message...',
+                            hintText: 'Type a gossip...',
                             hintStyle: TextStyle(
                               color: Color(0xFF666666),
                               fontSize: 15,
@@ -382,7 +377,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                           minLines: 1,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.attach_file,
+                            color: Color(0xFF666666), size: 22),
+                        onPressed: () {
+                          // TODO: Show attachment options
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -391,20 +392,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
               GestureDetector(
                 onTap: _sendMessage,
                 child: Container(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    gradient: GossipColors.primaryGradient,
+                    color: const Color(0xFF2A2A2A),
                     shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: GossipColors.primary.withValues(alpha: 0.4),
-                        blurRadius: 8,
-                        spreadRadius: 0,
-                      ),
-                    ],
                   ),
-                  child: const Icon(Icons.send_rounded,
-                      color: Colors.white, size: 20),
+                  child:
+                      const Icon(Icons.mic, color: Color(0xFF666666), size: 24),
                 ),
               ),
             ],
