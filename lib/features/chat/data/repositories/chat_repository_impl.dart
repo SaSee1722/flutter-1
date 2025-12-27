@@ -437,13 +437,27 @@ class SupabaseChatRepository implements ChatRepository {
         .from('chat_rooms')
         .insert({
           'name': name,
+          'bio': bio,
+          'avatar_url': avatarUrl,
           'last_message': 'Group created',
           'is_group': true,
           'admin_id': user.id,
-          // You would likely have a chat_participants table for the member IDs
         })
         .select()
         .single();
+
+    // Add members to the group (creator is auto-added by trigger as admin)
+    if (memberIds.isNotEmpty) {
+      final memberInserts = memberIds
+          .map((memberId) => {
+                'room_id': room['id'],
+                'user_id': memberId,
+                'role': 'member',
+              })
+          .toList();
+
+      await _supabase.from('group_members').insert(memberInserts);
+    }
 
     return ChatRoom.fromJson(room);
   }
@@ -453,12 +467,17 @@ class SupabaseChatRepository implements ChatRepository {
       {String? name, String? bio, String? avatarUrl}) async {
     await _supabase.from('chat_rooms').update({
       if (name != null) 'name': name,
+      if (bio != null) 'bio': bio,
       if (avatarUrl != null) 'avatar_url': avatarUrl,
     }).eq('id', roomId);
   }
 
   @override
   Future<void> removeMember(String roomId, String userId) async {
-    // Logic for chat_participants if implemented
+    await _supabase
+        .from('group_members')
+        .delete()
+        .eq('room_id', roomId)
+        .eq('user_id', userId);
   }
 }
