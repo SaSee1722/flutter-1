@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/di/injection_container.dart';
 import '../../domain/repositories/chat_repository.dart';
+import 'chat_detail_screen.dart';
 
 class GroupsScreen extends StatelessWidget {
   const GroupsScreen({super.key});
@@ -398,9 +399,15 @@ class _GroupListItem extends StatelessWidget {
           color: GossipColors.textDim,
         ),
         onTap: () {
-          // TODO: Navigate to group chat
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Opening ${group['name']}')),
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatDetailScreen(
+                roomId: group['id'],
+                chatName: group['name'] ?? 'Group Chat',
+                avatarUrl: group['avatar_url'],
+              ),
+            ),
           );
         },
       ),
