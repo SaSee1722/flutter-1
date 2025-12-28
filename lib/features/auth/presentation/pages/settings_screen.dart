@@ -11,6 +11,9 @@ import 'package:gossip/features/auth/presentation/bloc/auth_bloc.dart';
 import 'package:gossip/features/auth/presentation/bloc/auth_event.dart';
 import 'package:gossip/features/auth/presentation/bloc/auth_state.dart';
 import 'package:gossip/core/di/injection_container.dart';
+import 'package:gossip/shared/utils/toast_utils.dart';
+import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
+import 'blocked_users_screen.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
@@ -26,7 +29,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _isEditing = false;
-  String _language = 'English';
+  final String _language = 'English';
   final ImagePicker _picker = ImagePicker();
 
   late TextEditingController _fullNameController;
@@ -133,11 +136,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (image != null) _updateAvatar(image);
                   } catch (e) {
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                            content: Text('Camera error: $e'),
-                            backgroundColor: Colors.red),
-                      );
+                      ToastUtils.showError(context, 'Camera error: $e');
                     }
                   }
                 },
@@ -157,11 +156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   }
                 } catch (e) {
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                          content: Text('Error selecting image: $e'),
-                          backgroundColor: Colors.red),
-                    );
+                    ToastUtils.showError(context, 'Error selecting image: $e');
                   }
                 }
               },
@@ -235,11 +230,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 } else if (state is AuthAuthenticated) {
                   // _fetchProfile(); // Already fetched in initState
                 } else if (state is AuthFailure) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text(state.message),
-                        backgroundColor: Colors.red),
-                  );
+                  ToastUtils.showError(context, state.message);
                 }
               },
               child: SafeArea(
@@ -623,29 +614,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(
             children: [
               _SettingsToggle(
-                  icon: Icons.visibility_outlined,
-                  label: _t('last_seen'),
-                  value: true,
-                  onChanged: (v) {}),
-              _SettingsToggle(
-                  icon: Icons.done_all_rounded,
-                  label: _t('read_receipts'),
-                  value: true,
-                  onChanged: (v) {}),
-              _SettingsToggle(
                   icon: Icons.notifications_none_rounded,
                   label: _t('notifications'),
                   value: true,
                   onChanged: (v) {}),
               GestureDetector(
-                onTap: () => _showLanguageSelection(context),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const BlockedUsersScreen()),
+                  );
+                },
+                behavior: HitTestBehavior.opaque,
                 child: _SettingsChevron(
-                    icon: Icons.language_rounded,
-                    label: _t('language'),
-                    trailing: _language),
+                  icon: Icons.block_rounded,
+                  label: _t('blocked_users'),
+                ),
               ),
-              _SettingsChevron(
-                  icon: Icons.block_rounded, label: _t('blocked_users')),
+              GestureDetector(
+                onTap: () => _showAboutUs(context),
+                behavior: HitTestBehavior.opaque,
+                child: const _SettingsChevron(
+                  icon: Icons.info_outline_rounded,
+                  label: 'About Us',
+                ),
+              ),
+              GestureDetector(
+                onTap: () => _showDeleteAccountConfirmation(context),
+                behavior: HitTestBehavior.opaque,
+                child: const _SettingsChevron(
+                  icon: Icons.delete_forever_rounded,
+                  label: 'Delete Account',
+                ),
+              ),
             ],
           ),
         ),
@@ -653,7 +655,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showLanguageSelection(BuildContext context) {
+  void _showAboutUs(BuildContext context) {
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF0D0D0D),
@@ -665,14 +667,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            GradientText(_t('select_language'),
+            GradientText('ABOUT GOSSIP.',
                 gradient: GossipColors.primaryGradient,
                 style:
                     const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            const Text(
+              'Gossip is a premium messaging platform designed for those who appreciate style and substance. Connect with friends and communities in a beautifully crafted environment.',
+              style:
+                  TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+            ),
             const SizedBox(height: 24),
-            _buildLanguageItem('English'),
-            _buildLanguageItem('Hindi (हिन्दी)'),
-            _buildLanguageItem('Tamil (தமிழ்)'),
+            const Text(
+              'Version 1.0.0',
+              style: TextStyle(color: Colors.white24, fontSize: 12),
+            ),
             const SizedBox(height: 16),
           ],
         ),
@@ -680,20 +689,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildLanguageItem(String label) {
-    final isSelected = _language == label;
-    return ListTile(
-      onTap: () {
-        setState(() => _language = label);
-        Navigator.pop(context);
-      },
-      contentPadding: EdgeInsets.zero,
-      title: Text(label,
-          style: TextStyle(
-              color: isSelected ? GossipColors.primary : Colors.white70)),
-      trailing: isSelected
-          ? const Icon(Icons.check_circle_rounded, color: GossipColors.primary)
-          : null,
+  void _showDeleteAccountConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        title: const Text('Delete Account?',
+            style: TextStyle(color: Colors.white)),
+        content: const Text(
+            'This action is permanent and cannot be undone. All your messages and profile data will be lost.',
+            style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child:
+                const Text('CANCEL', style: TextStyle(color: Colors.white24)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context); // Close dialog
+              try {
+                // Show confirmation one last time or just do it
+                await sl<ChatRepository>().deleteAccount();
+                if (!context.mounted) return;
+                // After deletion, BLoC will handle logout if it's listening to auth state
+                // but we should probably force a logout or navigate to onboarding
+                context.read<AuthBloc>().add(AuthLogoutRequested());
+              } catch (e) {
+                if (!context.mounted) return;
+                ToastUtils.showError(context, 'Account deletion failed: $e');
+              }
+            },
+            child: const Text('DELETE', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -764,10 +794,11 @@ class _SettingsToggle extends StatelessWidget {
 class _SettingsChevron extends StatelessWidget {
   final IconData icon;
   final String label;
-  final String? trailing;
 
-  const _SettingsChevron(
-      {required this.icon, required this.label, this.trailing});
+  const _SettingsChevron({
+    required this.icon,
+    required this.label,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -780,12 +811,6 @@ class _SettingsChevron extends StatelessWidget {
           Expanded(
               child: Text(label,
                   style: const TextStyle(color: Colors.white, fontSize: 14))),
-          if (trailing != null)
-            Text(trailing!,
-                style: const TextStyle(
-                    color: GossipColors.primary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold)),
           const SizedBox(width: 8),
           const Icon(Icons.chevron_right_rounded, color: Colors.white24),
         ],

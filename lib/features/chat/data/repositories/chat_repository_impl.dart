@@ -17,16 +17,48 @@ class SupabaseChatRepository implements ChatRepository {
   @override
   Future<void> sendMessage(Message message) async {
     await _supabase.from('messages').insert(message.toJson());
+    _refreshController.add(null);
   }
+
+  final _refreshController = StreamController<void>.broadcast();
 
   @override
   Stream<List<Message>> getMessages(String roomId) {
+    // Store profiles in memory to avoid redundant fetches
+    final Map<String, Map<String, dynamic>> profileCache = {};
+
     return _supabase
         .from('messages')
         .stream(primaryKey: ['id'])
         .eq('room_id', roomId)
         .order('created_at', ascending: false)
-        .map((data) => data.map((json) => Message.fromJson(json)).toList());
+        .asyncMap((data) async {
+          final List<Message> messages = [];
+
+          for (var json in data) {
+            final userId = json['user_id'];
+
+            if (!profileCache.containsKey(userId)) {
+              final profile = await _supabase
+                  .from('profiles')
+                  .select('username, gender')
+                  .eq('id', userId)
+                  .maybeSingle();
+              if (profile != null) {
+                profileCache[userId] = profile;
+              }
+            }
+
+            final profile = profileCache[userId];
+            final message = Message.fromJson({
+              ...json,
+              'sender_name': profile?['username'],
+              'sender_gender': profile?['gender'],
+            });
+            messages.add(message);
+          }
+          return messages;
+        });
   }
 
   @override
@@ -103,11 +135,11 @@ class SupabaseChatRepository implements ChatRepository {
               .select('id')
               .eq('room_id', item['id'])
               .neq('user_id', user.id)
-              .eq('status', 'sent')
+              .inFilter('status', ['sent', 'delivered'])
         ]);
 
         final lastMsgData = results[0] as Map<String, dynamic>?;
-        final unreadMessages = results[1] as List<dynamic>;
+        final unreadCount = (results[1] as List).length;
 
         return ChatRoom(
           id: item['id'],
@@ -119,23 +151,73 @@ class SupabaseChatRepository implements ChatRepository {
               ? DateFormat('HH:mm')
                   .format(DateTime.parse(lastMsgData['created_at']).toLocal())
               : null,
-          unreadCount: unreadMessages.length,
+          unreadCount: unreadCount,
           isGroup: false,
           lastMessageTime: lastMsgData != null
               ? DateTime.parse(lastMsgData['created_at'])
               : DateTime.parse(item['created_at']),
+          otherUserId: friendId,
         );
       });
 
       rooms.addAll(await Future.wait(futures));
 
-      // Groups are NOT included in chat list
-      // They are fetched separately in Groups screen
-      // try {
-      //   final groupData =
-      //       await _supabase.from('chat_rooms').select().eq('is_group', true);
-      //   rooms.addAll((groupData as List).map((j) => ChatRoom.fromJson(j)));
-      // } catch (_) {}
+      // Groups
+      try {
+        final groupMemberships = await _supabase
+            .from('group_members')
+            .select('room_id')
+            .eq('user_id', user.id);
+
+        final roomIds = (groupMemberships as List)
+            .map((m) => m['room_id'] as String)
+            .toList();
+
+        if (roomIds.isNotEmpty) {
+          final groupsData = await _supabase
+              .from('chat_rooms')
+              .select()
+              .inFilter('id', roomIds);
+
+          for (var group in groupsData) {
+            final results = await Future.wait<dynamic>([
+              _supabase
+                  .from('messages')
+                  .select('id, content, created_at, status, user_id')
+                  .eq('room_id', group['id'])
+                  .order('created_at', ascending: false)
+                  .limit(1)
+                  .maybeSingle(),
+              _supabase
+                  .from('messages')
+                  .select('id')
+                  .eq('room_id', group['id'])
+                  .neq('user_id', user.id)
+                  .inFilter('status', ['sent', 'delivered'])
+            ]);
+
+            final lastMsgData = results[0] as Map<String, dynamic>?;
+            final unreadCount = (results[1] as List).length;
+
+            rooms.add(ChatRoom(
+              id: group['id'],
+              name: group['name'] ?? 'Unnamed Group',
+              avatarUrl: group['avatar_url'],
+              lastMessage: lastMsgData?['content'] ?? 'No messages yet',
+              time: lastMsgData != null
+                  ? DateFormat('HH:mm').format(
+                      DateTime.parse(lastMsgData['created_at']).toLocal())
+                  : null,
+              unreadCount: unreadCount,
+              isGroup: true,
+              lastMessageTime: lastMsgData != null
+                  ? DateTime.parse(lastMsgData['created_at'])
+                  : DateTime.parse(group['created_at']),
+              otherUserId: null,
+            ));
+          }
+        }
+      } catch (_) {}
 
       rooms.sort((a, b) {
         final timeA = a.lastMessageTime ?? DateTime(2000);
@@ -150,10 +232,12 @@ class SupabaseChatRepository implements ChatRepository {
 
     friendsSub = friendsStream.listen((_) => updateRooms());
     messagesSub = messagesTrigger.listen((_) => updateRooms());
+    final refreshSub = _refreshController.stream.listen((_) => updateRooms());
 
     controller.onCancel = () {
       friendsSub?.cancel();
       messagesSub?.cancel();
+      refreshSub.cancel();
       controller.close();
     };
 
@@ -175,6 +259,8 @@ class SupabaseChatRepository implements ChatRepository {
         .eq('room_id', roomId)
         .neq('user_id', user.id)
         .neq('status', 'read');
+
+    _refreshController.add(null);
   }
 
   @override
@@ -222,7 +308,6 @@ class SupabaseChatRepository implements ChatRepository {
 
     final channel = _supabase.channel('typing_$roomId');
 
-    // Always call subscribe, Supabase handles idempotent subscriptions
     channel.subscribe((status, [error]) async {
       if (status == RealtimeSubscribeStatus.subscribed) {
         if (isTyping) {
@@ -236,7 +321,6 @@ class SupabaseChatRepository implements ChatRepository {
       }
     });
 
-    // If already subscribed, we still want to track/untrack immediately
     if (isTyping) {
       await channel.track({
         'user_id': user.id,
@@ -254,24 +338,131 @@ class SupabaseChatRepository implements ChatRepository {
     final myId = _supabase.auth.currentUser?.id;
 
     channel.onPresenceSync((payload) {
-      final presenceState = channel.presenceState();
+      final state = channel.presenceState();
       bool anyoneTyping = false;
       String? typingUserId;
 
-      for (final presence in presenceState) {
-        final metas = (presence as dynamic).metas as List<dynamic>;
-        if (metas.isNotEmpty) {
-          final pMap = metas.first as Map<String, dynamic>;
-          if (pMap['user_id'] != myId && pMap['typing'] == true) {
-            anyoneTyping = true;
-            typingUserId = pMap['user_id'] as String?;
-            break;
+      // state is List<SinglePresenceState>
+      for (final userPresence in state) {
+        final payloads = (userPresence as dynamic).payloads as List<dynamic>?;
+        if (payloads != null) {
+          for (final payload in payloads) {
+            final pMap = payload as Map<String, dynamic>;
+            if (pMap['user_id'] != myId && pMap['typing'] == true) {
+              anyoneTyping = true;
+              typingUserId = pMap['user_id'] as String?;
+              break;
+            }
+          }
+        }
+        if (anyoneTyping) break;
+      }
+
+      if (!controller.isClosed) {
+        controller.add(anyoneTyping ? typingUserId : null);
+      }
+    }).subscribe();
+
+    return controller.stream;
+  }
+
+  @override
+  Future<void> setOnlineStatus(bool isOnline) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    final channel = _supabase.channel('global_presence');
+
+    channel.subscribe((status, [error]) async {
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        if (isOnline) {
+          await channel.track({
+            'user_id': user.id,
+            'online': true,
+            'last_seen': DateTime.now().toIso8601String(),
+          });
+        } else {
+          await channel.untrack();
+        }
+      }
+    });
+
+    if (isOnline) {
+      await channel.track({
+        'user_id': user.id,
+        'online': true,
+        'last_seen': DateTime.now().toIso8601String(),
+      });
+    } else {
+      await channel.untrack();
+    }
+  }
+
+  @override
+  Stream<bool> watchUserOnlineStatus(String userId) {
+    final controller = StreamController<bool>();
+    final channel = _supabase.channel('global_presence');
+
+    channel.onPresenceSync((payload) {
+      final state = channel.presenceState();
+      bool isOnline = false;
+
+      // state is List<SinglePresenceState>
+      for (final userPresence in state) {
+        final payloads = (userPresence as dynamic).payloads as List<dynamic>?;
+        if (payloads != null) {
+          for (final payload in payloads) {
+            final pMap = payload as Map<String, dynamic>;
+            if (pMap['user_id'] == userId && pMap['online'] == true) {
+              isOnline = true;
+              break;
+            }
+          }
+        }
+        if (isOnline) break;
+      }
+      if (!controller.isClosed) controller.add(isOnline);
+    }).subscribe();
+
+    return controller.stream;
+  }
+
+  @override
+  Stream<int> watchGroupPresence(String roomId) {
+    final controller = StreamController<int>();
+    final channel = _supabase.channel('group_presence_$roomId');
+
+    channel.onPresenceSync((payload) {
+      final state = channel.presenceState();
+      final onlineUsers = <String>{};
+
+      // state is List<SinglePresenceState>
+      for (final userPresence in state) {
+        final payloads = (userPresence as dynamic).payloads as List<dynamic>?;
+        if (payloads != null) {
+          for (final payload in payloads) {
+            final pMap = payload as Map<String, dynamic>;
+            if (pMap['online'] == true && pMap['user_id'] != null) {
+              onlineUsers.add(pMap['user_id']);
+            }
           }
         }
       }
-
-      controller.add(anyoneTyping ? typingUserId : null);
+      if (!controller.isClosed) controller.add(onlineUsers.length);
     }).subscribe();
+
+    // Also need to track ourselves in this group when we watch it
+    final user = _supabase.auth.currentUser;
+    if (user != null) {
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.track({
+            'user_id': user.id,
+            'online': true,
+          });
+        }
+      });
+    }
 
     return controller.stream;
   }
@@ -472,5 +663,64 @@ class SupabaseChatRepository implements ChatRepository {
         .delete()
         .eq('room_id', roomId)
         .eq('user_id', userId);
+  }
+
+  @override
+  Future<void> blockUser(String userId) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+    await _supabase.from('blocked_users').insert({
+      'blocker_id': user.id,
+      'blocked_id': userId,
+    });
+  }
+
+  @override
+  Future<void> unblockUser(String userId) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+    await _supabase
+        .from('blocked_users')
+        .delete()
+        .eq('blocker_id', user.id)
+        .eq('blocked_id', userId);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getBlockedUsers() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return [];
+
+    final data = await _supabase
+        .from('blocked_users')
+        .select(
+            'blocked_id, profiles!blocked_users_blocked_id_fkey(username, avatar_url)')
+        .eq('blocker_id', user.id);
+
+    return (data as List).map((item) {
+      final profile = item['profiles'] as Map<String, dynamic>;
+      return {
+        'id': item['blocked_id'],
+        'username': profile['username'],
+        'avatar_url': profile['avatar_url'],
+      };
+    }).toList();
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    // Call RPC function to delete auth record
+    // This requires the RPC function to be created in Supabase
+    try {
+      await _supabase.rpc('delete_user');
+      await _supabase.auth.signOut();
+    } catch (e) {
+      // Fallback: delete profile if RPC fails (security definer issues)
+      await _supabase.from('profiles').delete().eq('id', user.id);
+      await _supabase.auth.signOut();
+    }
   }
 }

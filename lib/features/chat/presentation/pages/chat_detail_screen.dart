@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -21,8 +23,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:gossip/features/chat/presentation/widgets/group_settings_sheet.dart';
+import '../../../../shared/utils/toast_utils.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String roomId;
@@ -51,7 +57,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   Message? _replyMessage;
   String? _typingUserName;
   StreamSubscription? _typingSubscription;
+  StreamSubscription? _presenceSubscription;
   Timer? _typingTimer;
+  bool _isOtherUserOnline = false;
+  int _onlineCount = 0;
+  String? _otherUserId;
 
   // Media & Emoji features
   bool _showEmojiPicker = false;
@@ -91,12 +101,52 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       }
     });
 
+    // Mark as read immediately on entry
+    sl<ChatRepository>().markAsRead(widget.roomId);
+
     // Mark as read whenever the messages are updated and not loading
     context.read<ChatBloc>().stream.listen((state) {
-      if (!state.isLoadingMessages && state.messages.isNotEmpty && mounted) {
+      if (!state.isLoadingMessages && mounted) {
         sl<ChatRepository>().markAsRead(widget.roomId);
       }
     });
+
+    _setupPresence();
+  }
+
+  Future<void> _setupPresence() async {
+    if (widget.isGroup) {
+      _presenceSubscription = sl<ChatRepository>()
+          .watchGroupPresence(widget.roomId)
+          .listen((count) {
+        if (mounted) setState(() => _onlineCount = count);
+      });
+    } else {
+      // For DMs, we need the other user's ID
+      try {
+        final res = await Supabase.instance.client
+            .from('friend_requests')
+            .select('sender_id, receiver_id')
+            .eq('id', widget.roomId)
+            .maybeSingle();
+
+        if (res != null) {
+          final myId = Supabase.instance.client.auth.currentUser?.id;
+          final otherId =
+              res['sender_id'] == myId ? res['receiver_id'] : res['sender_id'];
+
+          if (mounted) setState(() => _otherUserId = otherId);
+
+          if (otherId != null) {
+            _presenceSubscription = sl<ChatRepository>()
+                .watchUserOnlineStatus(otherId)
+                .listen((isOnline) {
+              if (mounted) setState(() => _isOtherUserOnline = isOnline);
+            });
+          }
+        }
+      } catch (_) {}
+    }
   }
 
   @override
@@ -106,6 +156,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     _typingTimer?.cancel();
     sl<ChatRepository>().setTypingStatus(widget.roomId, false);
     _typingSubscription?.cancel();
+    _presenceSubscription?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -126,6 +177,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   }
 
   void _onType(String value) {
+    setState(() {}); // Trigger rebuild to update mic/send icon
     _typingTimer?.cancel();
 
     if (value.isNotEmpty) {
@@ -154,6 +206,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       content: _messageController.text.trim(),
       createdAt: DateTime.now(),
       status: MessageStatus.sending,
+      senderGender: widget.currentUserGender,
+      senderName: 'You',
     );
 
     context.read<ChatBloc>().add(SendMessageRequested(message));
@@ -190,23 +244,38 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                       radius: 20,
                       backgroundColor:
                           GossipColors.primary.withValues(alpha: 0.2),
-                      backgroundImage: NetworkImage(widget.avatarUrl ??
-                          'https://i.pravatar.cc/150?u=${widget.roomId}'), // Placeholder fallback
+                      backgroundImage: widget.avatarUrl != null
+                          ? NetworkImage(widget.avatarUrl!)
+                          : null,
+                      child: widget.avatarUrl == null
+                          ? Text(widget.chatName[0].toUpperCase(),
+                              style: const TextStyle(
+                                  color: GossipColors.primary,
+                                  fontWeight: FontWeight.bold))
+                          : null,
                     ),
                   ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: Colors.greenAccent,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.black, width: 2),
+                  if (!widget.isGroup)
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: _isOtherUserOnline
+                              ? Colors.greenAccent
+                              : Colors.transparent,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _isOtherUserOnline
+                                ? Colors.black
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
               const SizedBox(width: 12),
@@ -219,12 +288,38 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                           letterSpacing: 1.0)),
-                  const Text('ONLINE',
+                  if (_typingUserName != null)
+                    Text(
+                      '${_typingUserName!.toUpperCase()} TYPING...',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: GossipColors.primary,
+                        letterSpacing: 1.5,
+                      ),
+                    )
+                  else if (widget.isGroup)
+                    Text(
+                      '$_onlineCount ONLINE',
                       style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.greenAccent,
-                          letterSpacing: 1.5)),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: _onlineCount > 0
+                            ? Colors.greenAccent
+                            : GossipColors.textDim,
+                        letterSpacing: 1.5,
+                      ),
+                    )
+                  else if (_isOtherUserOnline)
+                    const Text(
+                      'ONLINE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.greenAccent,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
                 ],
               ),
             ],
@@ -279,7 +374,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                     return _MessageBubble(
                       message: message,
                       isMe: isMe,
-                      userGender: widget.currentUserGender,
+                      isGroup: widget.isGroup,
                       onReply: (msg) {
                         setState(() => _replyMessage = msg);
                       },
@@ -320,57 +415,42 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       );
 
       if (image != null) {
-        // Show loading
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading image...')),
-        );
-
-        // Read file bytes
         final bytes = await image.readAsBytes();
+        final userId = Supabase.instance.client.auth.currentUser?.id;
+        if (userId == null) return;
+
         final fileExt = image.path.split('.').last;
         final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
-        final userId = Supabase.instance.client.auth.currentUser?.id;
-
-        if (userId == null) throw Exception('User not authenticated');
-
-        // Upload to Supabase Storage
         final filePath = '$userId/$fileName';
+
         await Supabase.instance.client.storage
             .from('chat-media')
             .uploadBinary(filePath, bytes);
 
-        // Get public URL
         final publicUrl = Supabase.instance.client.storage
             .from('chat-media')
             .getPublicUrl(filePath);
 
-        // Send message with image
         final message = Message(
           id: '',
           roomId: widget.roomId,
           userId: userId,
-          content: '📷 Image',
+          content: '',
           status: MessageStatus.sending,
           createdAt: DateTime.now(),
           mediaUrl: publicUrl,
           mediaType: 'image',
           mediaName: image.name,
           mediaSize: bytes.length,
+          senderGender: widget.currentUserGender,
+          senderName: 'You',
         );
-
-        context.read<ChatBloc>().add(SendMessageRequested(message));
 
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Image sent!')),
-        );
+        context.read<ChatBloc>().add(SendMessageRequested(message));
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error uploading image: $e')),
-      );
+      if (kDebugMode) print('Error: $e');
     }
   }
 
@@ -380,14 +460,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
           await _imagePicker.pickVideo(source: ImageSource.gallery);
 
       if (video != null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading video...')),
-        );
-
         final bytes = await video.readAsBytes();
         final userId = Supabase.instance.client.auth.currentUser?.id;
-        if (userId == null) throw Exception('User not authenticated');
+        if (userId == null) return;
 
         final fileExt = video.path.split('.').last;
         final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
@@ -405,27 +480,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
           id: '',
           roomId: widget.roomId,
           userId: userId,
-          content: '🎥 Video',
+          content: '',
           status: MessageStatus.sending,
           createdAt: DateTime.now(),
           mediaUrl: publicUrl,
           mediaType: 'video',
           mediaName: video.name,
           mediaSize: bytes.length,
+          senderGender: widget.currentUserGender,
+          senderName: 'You',
         );
-
-        context.read<ChatBloc>().add(SendMessageRequested(message));
 
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Video sent!')),
-        );
+        context.read<ChatBloc>().add(SendMessageRequested(message));
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error uploading video: $e')),
-      );
+      if (kDebugMode) print('Error: $e');
     }
   }
 
@@ -437,15 +507,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       );
 
       if (result != null && result.files.first.bytes != null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading document...')),
-        );
-
         final file = result.files.first;
         final bytes = file.bytes!;
         final userId = Supabase.instance.client.auth.currentUser?.id;
-        if (userId == null) throw Exception('User not authenticated');
+        if (userId == null) return;
 
         final fileName = file.name;
         final filePath =
@@ -463,27 +528,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
           id: '',
           roomId: widget.roomId,
           userId: userId,
-          content: '📄 ${file.name}',
+          content: '',
           status: MessageStatus.sending,
           createdAt: DateTime.now(),
           mediaUrl: publicUrl,
           mediaType: 'document',
           mediaName: file.name,
           mediaSize: bytes.length,
+          senderGender: widget.currentUserGender,
+          senderName: 'You',
         );
-
-        context.read<ChatBloc>().add(SendMessageRequested(message));
 
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Document sent!')),
-        );
+        context.read<ChatBloc>().add(SendMessageRequested(message));
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error uploading document: $e')),
-      );
+      if (kDebugMode) print('Error: $e');
     }
   }
 
@@ -494,15 +554,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       );
 
       if (result != null && result.files.first.bytes != null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Uploading audio...')),
-        );
-
         final file = result.files.first;
         final bytes = file.bytes!;
         final userId = Supabase.instance.client.auth.currentUser?.id;
-        if (userId == null) throw Exception('User not authenticated');
+        if (userId == null) return;
 
         final fileName = file.name;
         final filePath =
@@ -520,27 +575,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
           id: '',
           roomId: widget.roomId,
           userId: userId,
-          content: '🎵 ${file.name}',
+          content: '',
           status: MessageStatus.sending,
           createdAt: DateTime.now(),
           mediaUrl: publicUrl,
           mediaType: 'audio',
           mediaName: file.name,
           mediaSize: bytes.length,
+          senderGender: widget.currentUserGender,
+          senderName: 'You',
         );
-
-        context.read<ChatBloc>().add(SendMessageRequested(message));
 
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Audio sent!')),
-        );
+        context.read<ChatBloc>().add(SendMessageRequested(message));
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error uploading audio: $e')),
-      );
+      if (kDebugMode) print('Error: $e');
     }
   }
 
@@ -554,16 +604,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
             _isRecording = false;
           });
 
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Uploading voice message...')),
-          );
+          // Get bytes from the recorded file/blob
+          Uint8List bytes;
+          if (kIsWeb) {
+            final response = await http.get(Uri.parse(path));
+            bytes = response.bodyBytes;
+          } else {
+            final file = File(path);
+            bytes = await file.readAsBytes();
+            await file.delete();
+          }
 
-          // Read the recorded file
-          final file = File(path);
-          final bytes = await file.readAsBytes();
           final userId = Supabase.instance.client.auth.currentUser?.id;
-          if (userId == null) throw Exception('User not authenticated');
+          if (userId == null) return;
 
           final fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
           final filePath = '$userId/$fileName';
@@ -580,59 +633,48 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
             id: '',
             roomId: widget.roomId,
             userId: userId,
-            content: '🎤 Voice message',
+            content: '',
             status: MessageStatus.sending,
             createdAt: DateTime.now(),
             mediaUrl: publicUrl,
             mediaType: 'voice',
             mediaName: fileName,
             mediaSize: bytes.length,
+            senderGender: widget.currentUserGender,
+            senderName: 'You',
           );
-
-          context.read<ChatBloc>().add(SendMessageRequested(message));
-
-          // Delete temp file
-          await file.delete();
 
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Voice message sent!')),
-          );
+          context.read<ChatBloc>().add(SendMessageRequested(message));
         }
       } catch (e) {
         setState(() {
           _isRecording = false;
         });
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error uploading voice message: $e')),
-        );
+        if (kDebugMode) print('Error: $e');
       }
     } else {
       // Start recording
       try {
         if (await _audioRecorder.hasPermission()) {
-          final directory = await getTemporaryDirectory();
-          final path =
-              '${directory.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+          String? storagePath;
+          if (!kIsWeb) {
+            final directory = await getTemporaryDirectory();
+            storagePath =
+                '${directory.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+          }
 
           await _audioRecorder.start(
             const RecordConfig(encoder: AudioEncoder.aacLc),
-            path: path,
+            path: storagePath ?? '',
           );
 
           setState(() {
             _isRecording = true;
           });
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Microphone permission denied')),
-          );
         }
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error starting recording: $e')),
-        );
+        if (kDebugMode) print('Error: $e');
       }
     }
   }
@@ -659,7 +701,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
             ),
             const SizedBox(height: 20),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _AttachmentOption(
                   icon: Icons.photo_library,
@@ -670,15 +712,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                     _pickImage(ImageSource.gallery);
                   },
                 ),
-                _AttachmentOption(
-                  icon: Icons.camera_alt,
-                  label: 'Camera',
-                  color: Colors.pink,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _pickImage(ImageSource.camera);
-                  },
-                ),
+                const SizedBox(width: 48),
                 _AttachmentOption(
                   icon: Icons.videocam,
                   label: 'Video',
@@ -690,9 +724,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _AttachmentOption(
                   icon: Icons.insert_drive_file,
@@ -703,6 +737,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                     _pickFile();
                   },
                 ),
+                const SizedBox(width: 48),
                 _AttachmentOption(
                   icon: Icons.audiotrack,
                   label: 'Audio',
@@ -712,7 +747,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                     _pickAudio();
                   },
                 ),
-                const SizedBox(width: 80), // Placeholder for alignment
               ],
             ),
             const SizedBox(height: 20),
@@ -804,6 +838,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                             contentPadding: EdgeInsets.symmetric(vertical: 12),
                           ),
                           onChanged: _onType,
+                          onSubmitted: (_) => _sendMessage(),
                           maxLines: 5,
                           minLines: 1,
                         ),
@@ -812,6 +847,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                         icon: const Icon(Icons.attach_file,
                             color: Color(0xFFB0B0B0), size: 22),
                         onPressed: _showAttachmentOptions,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        icon: const Icon(Icons.camera_alt,
+                            color: Color(0xFFB0B0B0), size: 22),
+                        onPressed: () => _pickImage(ImageSource.camera),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -877,133 +920,43 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     }
   }
 
-  void _showGroupInfo() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.7,
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0A0A0A),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-          border: Border(
-            top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-          ),
+  Future<void> _showGroupInfo() async {
+    try {
+      // Fetch room data and check if current user is admin
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      final roomData = await Supabase.instance.client
+          .from('chat_rooms')
+          .select()
+          .eq('id', widget.roomId)
+          .single();
+
+      final memberData = await Supabase.instance.client
+          .from('group_members')
+          .select('role')
+          .eq('room_id', widget.roomId)
+          .eq('user_id', userId!)
+          .maybeSingle();
+
+      final bool isAdmin =
+          memberData?['role'] == 'admin' || roomData['admin_id'] == userId;
+
+      if (!mounted) return;
+
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (context) => GroupSettingsSheet(
+          roomId: widget.roomId,
+          groupData: roomData,
+          isAdmin: isAdmin,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('GROUP INFO',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.2)),
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white54),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Center(
-              child: CircleAvatar(
-                radius: 50,
-                backgroundColor: GossipColors.primary.withValues(alpha: 0.2),
-                backgroundImage: widget.avatarUrl != null
-                    ? NetworkImage(widget.avatarUrl!)
-                    : null,
-                child: widget.avatarUrl == null
-                    ? const Icon(Icons.group,
-                        size: 50, color: GossipColors.primary)
-                    : null,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Center(
-              child: Text(
-                widget.chatName,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'MEMBERS',
-              style: TextStyle(
-                color: GossipColors.textDim,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: FutureBuilder<List<dynamic>>(
-                future: Supabase.instance.client
-                    .from('group_members')
-                    .select('user_id, role')
-                    .eq('room_id', widget.roomId),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final members = snapshot.data!;
-                  return ListView.builder(
-                    itemCount: members.length,
-                    itemBuilder: (context, index) {
-                      final member = members[index];
-                      final isAdmin = member['role'] == 'admin';
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor:
-                              GossipColors.primary.withValues(alpha: 0.2),
-                          child: const Icon(Icons.person,
-                              color: GossipColors.primary),
-                        ),
-                        title: Text(
-                          member['user_id'],
-                          style: const TextStyle(color: Colors.white),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: isAdmin
-                            ? Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: GossipColors.primary
-                                      .withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Text(
-                                  'ADMIN',
-                                  style: TextStyle(
-                                    color: GossipColors.primary,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              )
-                            : null,
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (mounted) {
+        if (kDebugMode) print('Error loading group info: $e');
+      }
+    }
   }
 
   void _showUserActions() {
@@ -1054,7 +1007,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                 icon: Icons.block,
                 label: 'Block User',
                 color: Colors.redAccent,
-                onTap: () {}),
+                onTap: () async {
+                  if (_otherUserId == null) return;
+                  Navigator.pop(context);
+                  try {
+                    await sl<ChatRepository>().blockUser(_otherUserId!);
+                    if (!context.mounted) return;
+                    ToastUtils.showInfo(context, 'User blocked successfully.');
+                    Navigator.pop(context);
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    ToastUtils.showError(context, 'Failed to block user: $e');
+                  }
+                }),
             _buildActionItem(
                 icon: Icons.report_gmailerrorred,
                 label: 'Report User',
@@ -1123,11 +1088,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       );
     } else {
       await _toggleChatLock(prefs);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Chat Status Updated')),
-        );
-      }
     }
   }
 
@@ -1145,14 +1105,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 class _MessageBubble extends StatefulWidget {
   final Message message;
   final bool isMe;
-  final String? userGender;
+  final bool isGroup;
   final Function(Message) onReply;
   final Function(String?) onReact;
 
   const _MessageBubble({
     required this.message,
     required this.isMe,
-    this.userGender,
+    this.isGroup = false,
     required this.onReply,
     required this.onReact,
   });
@@ -1162,36 +1122,26 @@ class _MessageBubble extends StatefulWidget {
 }
 
 class _MessageBubbleState extends State<_MessageBubble> {
-  String? _selectedReaction;
-
   @override
   Widget build(BuildContext context) {
     Color bubbleColor;
-    if (widget.isMe) {
-      if (widget.userGender?.toLowerCase() == 'male') {
-        bubbleColor = const Color(0xFF87CEEB); // Sky Blue
-      } else if (widget.userGender?.toLowerCase() == 'female') {
-        bubbleColor = const Color(0xFFF4C2C2); // Baby Pink
-      } else {
-        bubbleColor = GossipColors.primary.withValues(alpha: 0.2); // Default
-      }
+    final gender = widget.message.senderGender?.toLowerCase();
+
+    if (gender == 'male') {
+      bubbleColor = const Color(0xFF87CEEB); // Sky Blue
+    } else if (gender == 'female') {
+      bubbleColor = const Color(0xFFF4C2C2); // Baby Pink
+    } else if (gender == 'others' || gender == 'other') {
+      bubbleColor = const Color(0xFFFFD700); // Golden
     } else {
-      bubbleColor = GossipColors.cardBackground;
+      bubbleColor = widget.isMe
+          ? GossipColors.primary.withValues(alpha: 0.2)
+          : GossipColors.cardBackground;
     }
 
-    // Determine text color based on bubble color contrast if needed
-    // Usually white is fine, but for very light pink/blue, maybe black?
-    // User requested "cloud message should in the baby pink color".
-    // Assuming white text is still desired unless unreadable.
-    // Sky Blue (135, 206, 235) -> Lum ~ 0.7. White might be hard to read.
-    // Baby Pink (244, 194, 194) -> Lum ~ 0.8. White definitely hard.
-    // Let's use Black text for these light colors if isMe.
-
-    final textColor = (widget.isMe &&
-            (widget.userGender?.toLowerCase() == 'male' ||
-                widget.userGender?.toLowerCase() == 'female'))
-        ? Colors.black
-        : Colors.white;
+    final bool isSpecialColor =
+        gender == 'male' || gender == 'female' || gender == 'other';
+    final textColor = (isSpecialColor) ? Colors.black : Colors.white;
 
     return Dismissible(
       key: ValueKey(widget.message.id),
@@ -1235,56 +1185,80 @@ class _MessageBubbleState extends State<_MessageBubble> {
                   border:
                       Border.all(color: Colors.white.withValues(alpha: 0.05)),
                 ),
-                child: IntrinsicWidth(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (widget.message.mediaUrl != null) ...[
-                        _buildMediaContent(),
-                        const SizedBox(height: 8),
-                      ],
-                      MarkdownBody(
-                        data: widget.message.content,
-                        styleSheet: MarkdownStyleSheet(
-                          p: TextStyle(color: textColor, fontSize: 15),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  children: [
+                    if (widget.message.status == MessageStatus.sending)
+                      const Positioned.fill(child: _WaveLoadingOverlay()),
+                    IntrinsicWidth(
+                      child: Column(
                         mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Text(
-                            DateFormat('HH:mm')
-                                .format(widget.message.createdAt),
-                            style: TextStyle(
-                                color: textColor.withValues(alpha: 0.6),
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500),
-                          ),
-                          if (widget.isMe) ...[
-                            const SizedBox(width: 4),
-                            _buildStatusIcon(),
+                          if (widget.isGroup && !widget.isMe) ...[
+                            Text(
+                              widget.message.senderName ?? 'Gossip Member',
+                              style: TextStyle(
+                                color: textColor.withValues(alpha: 0.7),
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
                           ],
+                          if (widget.message.mediaUrl != null)
+                            _buildMediaContent(),
+                          if (widget.message.mediaUrl != null &&
+                              widget.message.mediaType != 'voice' &&
+                              widget.message.mediaType != 'audio' &&
+                              widget.message.content.trim().isNotEmpty &&
+                              !widget.message.content.contains('Image') &&
+                              !widget.message.content.contains('Video') &&
+                              !widget.message.content.contains('Document') &&
+                              !widget.message.content.contains('Audio') &&
+                              widget.message.content != '📷' &&
+                              widget.message.content != '🎥')
+                            const SizedBox(height: 8),
+                          if (widget.message.mediaType != 'voice' &&
+                              widget.message.mediaType != 'audio' &&
+                              widget.message.content.trim().isNotEmpty &&
+                              !widget.message.content.contains('Image') &&
+                              !widget.message.content.contains('Video') &&
+                              !widget.message.content.contains('Document') &&
+                              !widget.message.content.contains('Audio') &&
+                              widget.message.content != '📷' &&
+                              widget.message.content != '🎥')
+                            MarkdownBody(
+                              data: widget.message.content,
+                              styleSheet: MarkdownStyleSheet(
+                                p: TextStyle(color: textColor, fontSize: 15),
+                              ),
+                            ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                DateFormat('HH:mm')
+                                    .format(widget.message.createdAt),
+                                style: TextStyle(
+                                    color: textColor.withValues(alpha: 0.6),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500),
+                              ),
+                              if (widget.isMe) ...[
+                                const SizedBox(width: 4),
+                                _buildStatusIcon(),
+                              ],
+                            ],
+                          ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-              if (_selectedReaction != null)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: GossipColors.cardBackground,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Text(_selectedReaction!,
-                      style: const TextStyle(fontSize: 12)),
-                ).animate().scale(duration: 200.ms),
             ],
           ),
         ),
@@ -1398,11 +1372,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open file')),
-        );
-      }
+      if (kDebugMode) print('Could not open URL: $url');
     }
   }
 
@@ -1425,7 +1395,6 @@ class _MessageBubbleState extends State<_MessageBubble> {
             children: ['❤️', '😂', '😮', '😢', '🔥', '👍']
                 .map((e) => GestureDetector(
                       onTap: () {
-                        setState(() => _selectedReaction = e);
                         widget.onReact(e);
                         Navigator.pop(context);
                       },
@@ -1453,12 +1422,91 @@ class _MessageBubbleState extends State<_MessageBubble> {
       case MessageStatus.sending:
         return const Icon(Icons.access_time, size: 12, color: tickColor);
       case MessageStatus.sent:
-        return const Icon(Icons.check, size: 12, color: tickColor);
       case MessageStatus.delivered:
+        return const Icon(Icons.check, size: 12, color: tickColor);
       case MessageStatus.read:
-        return const Icon(Icons.done_all, size: 12, color: tickColor);
+        return const Icon(Icons.done_all, size: 12, color: Colors.blue);
     }
   }
+}
+
+class _WaveLoadingOverlay extends StatefulWidget {
+  const _WaveLoadingOverlay();
+
+  @override
+  State<_WaveLoadingOverlay> createState() => _WaveLoadingOverlayState();
+}
+
+class _WaveLoadingOverlayState extends State<_WaveLoadingOverlay>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          painter: _WavePainter(
+            progress: _controller.value,
+            color: Colors.white.withValues(alpha: 0.25),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WavePainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  _WavePainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final path = Path();
+    final y = size.height * (1 - progress); // Water level rises
+
+    path.moveTo(0, y);
+    for (double x = 0; x <= size.width; x++) {
+      final waveIntensity = 4.0;
+      final waveLength = size.width / 1.5;
+      path.lineTo(
+          x,
+          y +
+              waveIntensity *
+                  math.sin((x / waveLength + progress) * 2 * math.pi));
+    }
+
+    path.lineTo(size.width, size.height);
+    path.lineTo(0, size.height);
+    path.close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _WavePainter oldDelegate) => true;
 }
 
 class _AudioMessagePlayer extends StatefulWidget {
@@ -1484,6 +1532,8 @@ class _AudioMessagePlayerState extends State<_AudioMessagePlayer> {
   }
 
   void _initPlayer() {
+    _audioPlayer
+        .setSource(UrlSource(widget.url)); // Pre-load source to get duration
     _audioPlayer.onDurationChanged.listen((d) {
       if (mounted) setState(() => _duration = d);
     });
@@ -1498,6 +1548,14 @@ class _AudioMessagePlayerState extends State<_AudioMessagePlayer> {
         });
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(_AudioMessagePlayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _audioPlayer.setSource(UrlSource(widget.url));
+    }
   }
 
   @override
@@ -1658,7 +1716,6 @@ class _TypingIndicator extends StatelessWidget {
   }
 }
 
-// Attachment Option Widget
 class _AttachmentOption extends StatelessWidget {
   final IconData icon;
   final String label;

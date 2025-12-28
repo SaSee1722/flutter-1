@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gossip/shared/widgets/gradient_text.dart';
 import '../../../../core/theme/gossip_colors.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../bloc/chat_bloc.dart';
+import '../bloc/chat_state.dart';
 
 import '../../../../core/di/injection_container.dart';
 import '../../domain/repositories/chat_repository.dart';
 import 'chat_detail_screen.dart';
+import '../../../../shared/utils/toast_utils.dart';
 
 class GroupsScreen extends StatelessWidget {
   const GroupsScreen({super.key});
@@ -108,15 +111,20 @@ class GroupsScreen extends StatelessWidget {
   }
 
   Widget _buildGroupsSection() {
-    return StreamBuilder<List<dynamic>>(
-      stream: sl<ChatRepository>().currentUser != null
-          ? Supabase.instance.client
-              .from('group_members')
-              .stream(primaryKey: ['id']).eq(
-                  'user_id', sl<ChatRepository>().currentUser!.id)
-          : Stream.value([]),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+    return BlocBuilder<ChatBloc, ChatState>(
+      builder: (context, state) {
+        if (state.isLoadingRooms && state.rooms.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32.0),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        final groups = state.rooms.where((r) => r.isGroup).toList();
+
+        if (groups.isEmpty) {
           return Container(
             margin: const EdgeInsets.all(24),
             padding: const EdgeInsets.all(16),
@@ -129,7 +137,7 @@ class GroupsScreen extends StatelessWidget {
               child: Padding(
                 padding: EdgeInsets.all(32.0),
                 child: Text(
-                  'You are not in any groups.',
+                  'You are not in any communities yet.',
                   style: TextStyle(color: GossipColors.textDim),
                 ),
               ),
@@ -137,28 +145,18 @@ class GroupsScreen extends StatelessWidget {
           );
         }
 
-        final groupMemberships = snapshot.data!;
-        final roomIds = groupMemberships.map((m) => m['room_id']).toList();
-
-        return FutureBuilder<List<dynamic>>(
-          future: Supabase.instance.client
-              .from('chat_rooms')
-              .select()
-              .inFilter('id', roomIds),
-          builder: (context, groupSnapshot) {
-            if (!groupSnapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            final groups = groupSnapshot.data!;
-
-            return ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: groups.length,
-              itemBuilder: (context, index) {
-                final group = groups[index];
-                return _GroupListItem(group: group);
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: groups.length,
+          itemBuilder: (context, index) {
+            final group = groups[index];
+            return _GroupListItem(
+              group: {
+                'id': group.id,
+                'name': group.name,
+                'avatar_url': group.avatarUrl,
+                'last_message': group.lastMessage,
               },
             );
           },
@@ -309,31 +307,27 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
             width: double.infinity,
             height: 56,
             child: ElevatedButton(
-              onPressed: _selectedFriends.isEmpty ||
-                      _nameController.text.isEmpty
-                  ? null
-                  : () async {
-                      try {
-                        await sl<ChatRepository>().createGroup(
-                          name: _nameController.text,
-                          memberIds: _selectedFriends,
-                        );
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('Group created successfully!')),
-                          );
-                        }
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text('Failed to create group: $e')),
-                          );
-                        }
-                      }
-                    },
+              onPressed:
+                  _selectedFriends.isEmpty || _nameController.text.isEmpty
+                      ? null
+                      : () async {
+                          try {
+                            await sl<ChatRepository>().createGroup(
+                              name: _nameController.text,
+                              memberIds: _selectedFriends,
+                            );
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                              ToastUtils.showSuccess(
+                                  context, 'Group created successfully!');
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ToastUtils.showError(
+                                  context, 'Failed to create group: $e');
+                            }
+                          }
+                        },
               style: ElevatedButton.styleFrom(
                 backgroundColor: GossipColors.primary,
                 foregroundColor: Colors.black,
@@ -386,7 +380,7 @@ class _GroupListItem extends StatelessWidget {
           ),
         ),
         subtitle: Text(
-          group['bio'] ?? 'No description',
+          group['last_message'] ?? 'No messages yet',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(

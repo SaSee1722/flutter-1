@@ -14,6 +14,8 @@ class Message {
   final String? mediaType; // 'image', 'video', 'document', 'audio', 'voice'
   final String? mediaName;
   final int? mediaSize;
+  final String? senderGender;
+  final String? senderName;
 
   Message({
     required this.id,
@@ -29,6 +31,8 @@ class Message {
     this.mediaType,
     this.mediaName,
     this.mediaSize,
+    this.senderGender,
+    this.senderName,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -51,6 +55,8 @@ class Message {
       mediaType: json['media_type'],
       mediaName: json['media_name'],
       mediaSize: json['media_size'],
+      senderGender: json['sender_gender'],
+      senderName: json['sender_name'],
     );
   }
 

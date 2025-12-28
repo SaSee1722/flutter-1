@@ -343,7 +343,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget _buildChatSection(BuildContext context) {
     return BlocBuilder<ChatBloc, ChatState>(
       builder: (context, state) {
-        final rooms = state.rooms;
+        final dms = state.rooms.where((r) => !r.isGroup).toList();
 
         return Container(
           width: double.infinity,
@@ -368,9 +368,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              if (state.isLoadingRooms && rooms.isEmpty)
+              if (state.isLoadingRooms && dms.isEmpty)
                 const Center(child: CircularProgressIndicator())
-              else if (rooms.isEmpty)
+              else if (dms.isEmpty)
                 const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24.0),
@@ -384,11 +384,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: rooms.length,
+                  itemCount: dms.length,
                   separatorBuilder: (context, index) => Divider(
                       color: Colors.white.withValues(alpha: 0.05), height: 32),
                   itemBuilder: (context, index) {
-                    final room = rooms[index];
+                    final room = dms[index];
                     return InkWell(
                       onTap: () async {
                         final prefs = await SharedPreferences.getInstance();
@@ -668,11 +668,12 @@ class _VibeItem extends StatelessWidget {
                             : GossipColors.secondary,
                         width: 2,
                       ),
-                      image: DecorationImage(
-                        image: NetworkImage(imageUrl ??
-                            'https://picsum.photos/seed/${label.hashCode}/200'),
-                        fit: BoxFit.cover,
-                      ),
+                      image: imageUrl != null
+                          ? DecorationImage(
+                              image: NetworkImage(imageUrl!),
+                              fit: BoxFit.cover,
+                            )
+                          : null,
                       boxShadow: [
                         BoxShadow(
                           color: (isYours
@@ -684,6 +685,20 @@ class _VibeItem extends StatelessWidget {
                         ),
                       ],
                     ),
+                    child: imageUrl == null
+                        ? Center(
+                            child: Text(
+                              label[0].toUpperCase(),
+                              style: TextStyle(
+                                color: isYours
+                                    ? GossipColors.primary
+                                    : GossipColors.secondary,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          )
+                        : null,
                   ),
                 ),
                 if (isYours)
@@ -739,12 +754,54 @@ class _ChatListItem extends StatelessWidget {
 
     return Row(
       children: [
-        CircleAvatar(
-          radius: 24,
-          backgroundColor: Colors.grey[900],
-          backgroundImage: room.avatarUrl != null
-              ? NetworkImage(room.avatarUrl!)
-              : NetworkImage('https://picsum.photos/seed/${room.id}/100'),
+        Stack(
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: GossipColors.primary.withValues(alpha: 0.1),
+              backgroundImage:
+                  room.avatarUrl != null ? NetworkImage(room.avatarUrl!) : null,
+              child: room.avatarUrl == null
+                  ? Text(room.name[0].toUpperCase(),
+                      style: const TextStyle(
+                          color: GossipColors.primary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16))
+                  : null,
+            ),
+            if (!room.isGroup && room.otherUserId != null)
+              StreamBuilder<bool>(
+                stream: sl<ChatRepository>()
+                    .watchUserOnlineStatus(room.otherUserId!),
+                builder: (context, snapshot) {
+                  final isOnline = snapshot.data ?? false;
+                  if (!isOnline) return const SizedBox();
+                  return Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: Colors.greenAccent,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: GossipColors.background,
+                          width: 2.5,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.greenAccent.withValues(alpha: 0.3),
+                            blurRadius: 4,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+          ],
         ),
         const SizedBox(width: 16),
         Expanded(

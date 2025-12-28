@@ -8,6 +8,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:gossip/features/chat/presentation/bloc/chat_bloc.dart';
 import 'package:gossip/features/chat/presentation/bloc/chat_event.dart';
 import 'package:gossip/features/chat/presentation/bloc/chat_state.dart';
+import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
+import 'package:gossip/core/di/injection_container.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -16,7 +18,7 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _selectedIndex = 0;
 
   final List<Widget> _pages = [
@@ -29,8 +31,29 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Ensure rooms are loaded for badges
     context.read<ChatBloc>().add(LoadRooms());
+    // Initial online status
+    sl<ChatRepository>().setOnlineStatus(true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    sl<ChatRepository>().setOnlineStatus(false);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      sl<ChatRepository>().setOnlineStatus(true);
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      sl<ChatRepository>().setOnlineStatus(false);
+    }
   }
 
   @override

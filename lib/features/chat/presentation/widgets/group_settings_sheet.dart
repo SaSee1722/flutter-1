@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/theme/gossip_colors.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../../../shared/utils/toast_utils.dart';
 
 class GroupSettingsSheet extends StatefulWidget {
   final String roomId;
@@ -22,6 +24,8 @@ class GroupSettingsSheet extends StatefulWidget {
 class _GroupSettingsSheetState extends State<GroupSettingsSheet> {
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
+  String? _avatarUrl;
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -29,6 +33,7 @@ class _GroupSettingsSheetState extends State<GroupSettingsSheet> {
     _nameController = TextEditingController(text: widget.groupData['name']);
     _descriptionController =
         TextEditingController(text: widget.groupData['bio'] ?? '');
+    _avatarUrl = widget.groupData['avatar_url'];
   }
 
   @override
@@ -87,12 +92,11 @@ class _GroupSettingsSheetState extends State<GroupSettingsSheet> {
                   CircleAvatar(
                     radius: 60,
                     backgroundColor: const Color(0xFF1A1A1A),
-                    backgroundImage: widget.groupData['avatar_url'] != null
-                        ? NetworkImage(widget.groupData['avatar_url'])
-                        : null,
-                    child: widget.groupData['avatar_url'] == null
+                    backgroundImage:
+                        _avatarUrl != null ? NetworkImage(_avatarUrl!) : null,
+                    child: _avatarUrl == null
                         ? Text(
-                            widget.groupData['name']?[0]?.toUpperCase() ?? 'P',
+                            widget.groupData['name']?[0]?.toUpperCase() ?? 'G',
                             style: const TextStyle(
                               fontSize: 40,
                               fontWeight: FontWeight.bold,
@@ -101,6 +105,14 @@ class _GroupSettingsSheetState extends State<GroupSettingsSheet> {
                           )
                         : null,
                   ),
+                  if (_isLoading)
+                    const Positioned.fill(
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: GossipColors.primary,
+                        ),
+                      ),
+                    ),
                   if (widget.isAdmin)
                     Positioned(
                       bottom: 0,
@@ -242,11 +254,47 @@ class _GroupSettingsSheetState extends State<GroupSettingsSheet> {
     ).animate().fadeIn().slideY(begin: 0.1, end: 0);
   }
 
-  void _changeGroupIcon() {
-    // TODO: Implement image picker
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Image picker coming soon!')),
-    );
+  Future<void> _changeGroupIcon() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 75,
+      );
+
+      if (image == null) return;
+
+      setState(() => _isLoading = true);
+
+      final bytes = await image.readAsBytes();
+      final fileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final path = '${widget.roomId}/$fileName';
+
+      await Supabase.instance.client.storage.from('group_avatars').uploadBinary(
+          path, bytes,
+          fileOptions: const FileOptions(contentType: 'image/jpeg'));
+
+      final publicUrl = Supabase.instance.client.storage
+          .from('group_avatars')
+          .getPublicUrl(path);
+
+      setState(() {
+        _avatarUrl = publicUrl;
+        _isLoading = false;
+      });
+
+      // Also update the database immediately
+      await Supabase.instance.client
+          .from('chat_rooms')
+          .update({'avatar_url': publicUrl}).eq('id', widget.roomId);
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ToastUtils.showError(context, 'Error: $e');
+      }
+    }
   }
 
   void _viewMembers() {
@@ -353,13 +401,29 @@ class _GroupMembersSheet extends StatelessWidget {
             child: FutureBuilder<List<dynamic>>(
               future: Supabase.instance.client
                   .from('group_members')
-                  .select('user_id, role')
+                  .select('user_id, role, profiles(username, avatar_url)')
                   .eq('room_id', roomId),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      'Error: ${snapshot.error}',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  );
+                }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final members = snapshot.data!;
+                if (members.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'No members found',
+                      style: TextStyle(color: GossipColors.textDim),
+                    ),
+                  );
+                }
                 return ListView.builder(
                   itemCount: members.length,
                   itemBuilder: (context, index) {
@@ -380,8 +444,15 @@ class _GroupMembersSheet extends StatelessWidget {
                             radius: 24,
                             backgroundColor:
                                 GossipColors.primary.withValues(alpha: 0.2),
-                            child: const Icon(Icons.person,
-                                color: GossipColors.primary),
+                            backgroundImage: member['profiles']
+                                        ?['avatar_url'] !=
+                                    null
+                                ? NetworkImage(member['profiles']['avatar_url'])
+                                : null,
+                            child: member['profiles']?['avatar_url'] == null
+                                ? const Icon(Icons.person,
+                                    color: GossipColors.primary)
+                                : null,
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -389,7 +460,7 @@ class _GroupMembersSheet extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  userId,
+                                  member['profiles']?['username'] ?? userId,
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w600,
@@ -450,18 +521,14 @@ class _GroupMembersSheet extends StatelessWidget {
           .eq('user_id', userId);
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Member removed successfully!')),
-        );
+        ToastUtils.showSuccess(context, 'Member removed successfully!');
         // Refresh the list
         Navigator.pop(context);
         Navigator.pop(context);
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ToastUtils.showError(context, 'Error: $e');
       }
     }
   }

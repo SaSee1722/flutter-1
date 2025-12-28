@@ -8,6 +8,7 @@ class ChatRoom {
   final String? gender;
   final bool isGroup;
   final DateTime? lastMessageTime;
+  final String? otherUserId;
 
   ChatRoom({
     required this.id,
@@ -19,6 +20,7 @@ class ChatRoom {
     this.gender,
     this.isGroup = false,
     this.lastMessageTime,
+    this.otherUserId,
   });
 
   factory ChatRoom.fromJson(Map<String, dynamic> json) {
@@ -34,6 +36,7 @@ class ChatRoom {
       lastMessageTime: json['updated_at'] != null
           ? DateTime.parse(json['updated_at'])
           : null,
+      otherUserId: json['other_user_id'],
     );
   }
 }

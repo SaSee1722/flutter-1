@@ -58,6 +58,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       ..insert(0, event.message);
     emit(state.copyWith(messages: updatedMessages));
 
+    // Artificial delay to ensure "Sending..." animation is visible
+    // This addresses the issue where 1:1 chats update too fast to see the animation
+    await Future.delayed(const Duration(milliseconds: 1000));
+
     try {
       await _chatRepository.sendMessage(event.message);
     } catch (e) {

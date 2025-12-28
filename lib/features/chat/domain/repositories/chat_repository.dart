@@ -12,10 +12,18 @@ abstract class ChatRepository {
   Future<void> markAsDelivered(String messageId);
   Future<void> updateMessageReaction(String messageId, String? reaction);
 
-  // Typing status
+  // Typing & Presence
   Future<void> setTypingStatus(String roomId, bool isTyping);
-  Stream<String?> watchTypingStatus(
-      String roomId); // Returns userId if someone is typing
+  Stream<String?> watchTypingStatus(String roomId);
+  Future<void> setOnlineStatus(bool isOnline);
+  Stream<bool> watchUserOnlineStatus(String userId);
+  Stream<int> watchGroupPresence(String roomId);
+
+  // Privacy & Account
+  Future<void> blockUser(String userId);
+  Future<void> unblockUser(String userId);
+  Future<List<Map<String, dynamic>>> getBlockedUsers();
+  Future<void> deleteAccount();
 
   // Friend Requests
   Stream<List<FriendRequest>> getFriendRequests();

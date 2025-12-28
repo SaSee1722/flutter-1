@@ -3,11 +3,13 @@ import '../../../../core/theme/gossip_colors.dart';
 
 class GroupInfoScreen extends StatelessWidget {
   final String groupName;
+  final String? avatarUrl;
   final bool isAdmin;
 
   const GroupInfoScreen({
     super.key,
     required this.groupName,
+    this.avatarUrl,
     this.isAdmin = false,
   });
 
@@ -55,11 +57,25 @@ class GroupInfoScreen extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(color: GossipColors.primary, width: 2),
-                image: const DecorationImage(
-                  image: NetworkImage('https://picsum.photos/seed/group/300'),
-                  fit: BoxFit.cover,
-                ),
+                image: avatarUrl != null
+                    ? DecorationImage(
+                        image: NetworkImage(avatarUrl!),
+                        fit: BoxFit.cover,
+                      )
+                    : null,
               ),
+              child: avatarUrl == null
+                  ? Center(
+                      child: Text(
+                        groupName[0].toUpperCase(),
+                        style: const TextStyle(
+                          color: GossipColors.primary,
+                          fontSize: 40,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    )
+                  : null,
             ),
             if (isAdmin)
               Positioned(
