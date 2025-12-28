@@ -13,6 +13,10 @@ import '../../features/vibes/data/repositories/status_repository_impl.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/chat/presentation/bloc/chat_bloc.dart';
 import '../../features/vibes/presentation/bloc/vibe_bloc.dart';
+import '../../features/call/domain/repositories/call_repository.dart';
+import '../../features/call/data/webrtc_service.dart';
+import '../../features/call/presentation/bloc/call_bloc.dart';
+import '../notifications/notification_service.dart';
 
 final sl = GetIt.instance;
 
@@ -37,9 +41,17 @@ Future<void> init() async {
   sl.registerLazySingleton<ChatRepository>(() => SupabaseChatRepository(sl()));
   sl.registerLazySingleton<StatusRepository>(
       () => SupabaseStatusRepository(sl()));
+  sl.registerLazySingleton<CallRepository>(() => SupabaseCallRepository(sl()));
+  sl.registerLazySingleton<WebRTCService>(() => WebRTCService(sl()));
+  sl.registerLazySingleton<NotificationService>(() => NotificationService());
 
   // Blocs
   sl.registerFactory(() => AuthBloc(sl()));
   sl.registerFactory(() => ChatBloc(sl()));
   sl.registerFactory(() => VibeBloc(sl()));
+  sl.registerLazySingleton(() => CallBloc(
+        webRTCService: sl(),
+        callRepository: sl(),
+        chatRepository: sl(),
+      ));
 }

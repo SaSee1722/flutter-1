@@ -8,6 +8,8 @@ import '../../../../core/theme/gossip_colors.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
+import 'package:gossip/features/call/presentation/bloc/call_bloc.dart';
+import 'package:gossip/features/call/presentation/bloc/call_event.dart';
 import 'main_shell.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -103,6 +105,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
             BlocConsumer<AuthBloc, AuthState>(
               listener: (context, state) {
                 if (state is AuthAuthenticated) {
+                  // Initialize CallBloc
+                  context
+                      .read<CallBloc>()
+                      .add(InitializeCallBloc(state.user.id));
+
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                         content: Text('Account created successfully!')),

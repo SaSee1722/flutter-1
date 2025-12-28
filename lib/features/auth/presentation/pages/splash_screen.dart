@@ -5,6 +5,8 @@ import 'main_shell.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
+import 'package:gossip/features/call/presentation/bloc/call_bloc.dart';
+import 'package:gossip/features/call/presentation/bloc/call_event.dart';
 import '../../../../core/theme/gossip_colors.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -49,6 +51,9 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted) return;
 
     if (state is AuthAuthenticated) {
+      // Initialize CallBloc
+      context.read<CallBloc>().add(InitializeCallBloc(state.user.id));
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const MainShell()),

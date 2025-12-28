@@ -273,14 +273,14 @@ class _CreateGroupSheetState extends State<_CreateGroupSheet> {
                             contentPadding: EdgeInsets.zero,
                             leading: CircleAvatar(
                               backgroundColor: Colors.white12,
-                              backgroundImage: friend['avatar'] != null
-                                  ? NetworkImage(friend['avatar'])
+                              backgroundImage: friend['avatar_url'] != null
+                                  ? NetworkImage(friend['avatar_url'])
                                   : null,
-                              child: friend['avatar'] == null
-                                  ? Text(friend['name']?[0] ?? '?')
+                              child: friend['avatar_url'] == null
+                                  ? Text(friend['username']?[0] ?? '?')
                                   : null,
                             ),
-                            title: Text(friend['name'] ?? 'Unknown',
+                            title: Text(friend['username'] ?? 'Unknown',
                                 style: const TextStyle(color: Colors.white)),
                             trailing: Checkbox(
                               value: isSelected,

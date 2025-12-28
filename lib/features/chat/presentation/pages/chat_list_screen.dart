@@ -21,6 +21,7 @@ import 'package:gossip/features/vibes/domain/entities/user_status.dart';
 import 'package:gossip/core/di/injection_container.dart';
 import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
 import 'package:gossip/features/chat/domain/entities/friend_request.dart';
+import 'package:gossip/core/utils/date_formatter.dart';
 import 'search/search_users_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
@@ -820,7 +821,7 @@ class _ChatListItem extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    room.time ?? '',
+                    DateFormatter.formatRelativeTime(room.lastMessageTime),
                     style: const TextStyle(
                         color: GossipColors.textDim, fontSize: 11),
                   ),

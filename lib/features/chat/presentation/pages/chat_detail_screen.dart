@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:intl/intl.dart';
 import 'package:gossip/features/chat/domain/entities/message.dart';
 import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
 import 'package:gossip/features/chat/presentation/bloc/chat_bloc.dart';
@@ -18,6 +17,8 @@ import 'package:gossip/features/auth/presentation/pages/pin_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:gossip/features/call/presentation/bloc/call_bloc.dart';
+import 'package:gossip/features/call/presentation/bloc/call_event.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -28,6 +29,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:gossip/features/chat/presentation/widgets/group_settings_sheet.dart';
+import 'package:gossip/core/utils/date_formatter.dart';
 import '../../../../shared/utils/toast_utils.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -328,10 +330,28 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
         actions: [
           IconButton(
               icon: const Icon(Icons.videocam, color: Colors.white54),
-              onPressed: () {}),
+              onPressed: () {
+                if (!widget.isGroup && _otherUserId == null) return;
+                context.read<CallBloc>().add(StartCall(
+                      receiverId: widget.isGroup ? null : _otherUserId,
+                      roomId: widget.isGroup ? widget.roomId : null,
+                      name: widget.chatName,
+                      avatar: widget.avatarUrl,
+                      isVideo: true,
+                    ));
+              }),
           IconButton(
               icon: const Icon(Icons.call, color: Colors.white54),
-              onPressed: () {}),
+              onPressed: () {
+                if (!widget.isGroup && _otherUserId == null) return;
+                context.read<CallBloc>().add(StartCall(
+                      receiverId: widget.isGroup ? null : _otherUserId,
+                      roomId: widget.isGroup ? widget.roomId : null,
+                      name: widget.chatName,
+                      avatar: widget.avatarUrl,
+                      isVideo: false,
+                    ));
+              }),
           IconButton(
             icon: const Icon(Icons.more_vert, color: Colors.white54),
             onPressed: _showGossipActions,
@@ -1240,8 +1260,8 @@ class _MessageBubbleState extends State<_MessageBubble> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                DateFormat('HH:mm')
-                                    .format(widget.message.createdAt),
+                                DateFormatter.formatMessageTime(
+                                    widget.message.createdAt),
                                 style: TextStyle(
                                     color: textColor.withValues(alpha: 0.6),
                                     fontSize: 10,

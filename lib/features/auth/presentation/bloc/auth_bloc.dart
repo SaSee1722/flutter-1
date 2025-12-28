@@ -2,6 +2,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:gossip/features/auth/domain/repositories/auth_repository.dart';
 import 'auth_event.dart';
 import 'auth_state.dart';
+import 'package:gossip/core/notifications/notification_service.dart';
+import 'package:gossip/core/di/injection_container.dart' as di;
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final AuthRepository _authRepository;
@@ -40,6 +42,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       );
       final user = _authRepository.currentUser;
       if (user != null) {
+        di.sl<NotificationService>().uploadTokenToSupabase();
         emit(AuthAuthenticated(user));
       } else {
         emit(AuthUnauthenticated());
@@ -61,6 +64,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       );
       final user = _authRepository.currentUser;
       if (user != null) {
+        di.sl<NotificationService>().uploadTokenToSupabase();
         emit(AuthAuthenticated(user));
       } else {
         emit(AuthUnauthenticated());

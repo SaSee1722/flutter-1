@@ -45,4 +45,5 @@ abstract class ChatRepository {
   Future<void> updateGroupInfo(String roomId,
       {String? name, String? bio, String? avatarUrl});
   Future<void> removeMember(String roomId, String userId);
+  Future<Map<String, dynamic>?> getProfile(String userId);
 }

@@ -4,10 +4,10 @@ import 'package:gossip/features/chat/domain/entities/message.dart';
 import 'package:gossip/features/chat/domain/entities/chat_room.dart';
 import 'package:gossip/features/chat/domain/entities/friend_request.dart';
 import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
-import 'package:intl/intl.dart';
 
 class SupabaseChatRepository implements ChatRepository {
   final SupabaseClient _supabase;
+  RealtimeChannel? _presenceChannel;
 
   SupabaseChatRepository(this._supabase);
 
@@ -147,10 +147,7 @@ class SupabaseChatRepository implements ChatRepository {
           avatarUrl: profile?['avatar_url'],
           gender: profile?['gender'],
           lastMessage: lastMsgData?['content'] ?? 'Tap to gossip',
-          time: lastMsgData != null
-              ? DateFormat('HH:mm')
-                  .format(DateTime.parse(lastMsgData['created_at']).toLocal())
-              : null,
+          time: null,
           unreadCount: unreadCount,
           isGroup: false,
           lastMessageTime: lastMsgData != null
@@ -204,10 +201,7 @@ class SupabaseChatRepository implements ChatRepository {
               name: group['name'] ?? 'Unnamed Group',
               avatarUrl: group['avatar_url'],
               lastMessage: lastMsgData?['content'] ?? 'No messages yet',
-              time: lastMsgData != null
-                  ? DateFormat('HH:mm').format(
-                      DateTime.parse(lastMsgData['created_at']).toLocal())
-                  : null,
+              time: null,
               unreadCount: unreadCount,
               isGroup: true,
               lastMessageTime: lastMsgData != null
@@ -338,24 +332,26 @@ class SupabaseChatRepository implements ChatRepository {
     final myId = _supabase.auth.currentUser?.id;
 
     channel.onPresenceSync((payload) {
-      final state = channel.presenceState();
+      final dynamic state = channel.presenceState();
       bool anyoneTyping = false;
       String? typingUserId;
 
-      // state is List<SinglePresenceState>
-      for (final userPresence in state) {
-        final payloads = (userPresence as dynamic).payloads as List<dynamic>?;
-        if (payloads != null) {
-          for (final payload in payloads) {
-            final pMap = payload as Map<String, dynamic>;
-            if (pMap['user_id'] != myId && pMap['typing'] == true) {
-              anyoneTyping = true;
-              typingUserId = pMap['user_id'] as String?;
-              break;
-            }
-          }
+      final presences = <dynamic>[];
+      if (state is Map) {
+        for (var v in state.values) {
+          if (v is List) presences.addAll(v);
         }
-        if (anyoneTyping) break;
+      } else if (state is List) {
+        presences.addAll(state);
+      }
+
+      for (final presence in presences) {
+        final pMap = (presence as dynamic).payload as Map<String, dynamic>?;
+        if (pMap != null && pMap['user_id'] != myId && pMap['typing'] == true) {
+          anyoneTyping = true;
+          typingUserId = pMap['user_id'] as String?;
+          break;
+        }
       }
 
       if (!controller.isClosed) {
@@ -371,30 +367,19 @@ class SupabaseChatRepository implements ChatRepository {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
 
-    final channel = _supabase.channel('global_presence');
-
-    channel.subscribe((status, [error]) async {
-      if (status == RealtimeSubscribeStatus.subscribed) {
-        if (isOnline) {
-          await channel.track({
-            'user_id': user.id,
-            'online': true,
-            'last_seen': DateTime.now().toIso8601String(),
-          });
-        } else {
-          await channel.untrack();
-        }
-      }
-    });
+    if (_presenceChannel == null) {
+      _presenceChannel = _supabase.channel('global_presence');
+      _presenceChannel!.subscribe();
+    }
 
     if (isOnline) {
-      await channel.track({
+      await _presenceChannel!.track({
         'user_id': user.id,
         'online': true,
         'last_seen': DateTime.now().toIso8601String(),
       });
     } else {
-      await channel.untrack();
+      await _presenceChannel!.untrack();
     }
   }
 
@@ -404,23 +389,40 @@ class SupabaseChatRepository implements ChatRepository {
     final channel = _supabase.channel('global_presence');
 
     channel.onPresenceSync((payload) {
-      final state = channel.presenceState();
+      final dynamic state = channel.presenceState();
       bool isOnline = false;
 
-      // state is List<SinglePresenceState>
-      for (final userPresence in state) {
-        final payloads = (userPresence as dynamic).payloads as List<dynamic>?;
-        if (payloads != null) {
-          for (final payload in payloads) {
-            final pMap = payload as Map<String, dynamic>;
-            if (pMap['user_id'] == userId && pMap['online'] == true) {
-              isOnline = true;
-              break;
-            }
+      final presences = <dynamic>[];
+      if (state is Map) {
+        for (var v in state.values) {
+          if (v is List) presences.addAll(v);
+        }
+      } else if (state is List) {
+        presences.addAll(state);
+      }
+
+      for (final presence in presences) {
+        Map<String, dynamic>? data;
+        try {
+          if (presence is Map) {
+            data = Map<String, dynamic>.from(presence);
+          } else {
+            data = (presence as dynamic).payload as Map<String, dynamic>?;
+          }
+        } catch (_) {
+          if (presence is Map<String, dynamic>) {
+            data = presence;
           }
         }
-        if (isOnline) break;
+
+        if (data != null &&
+            data['user_id'] == userId &&
+            data['online'] == true) {
+          isOnline = true;
+          break;
+        }
       }
+
       if (!controller.isClosed) controller.add(isOnline);
     }).subscribe();
 
@@ -433,22 +435,38 @@ class SupabaseChatRepository implements ChatRepository {
     final channel = _supabase.channel('group_presence_$roomId');
 
     channel.onPresenceSync((payload) {
-      final state = channel.presenceState();
-      final onlineUsers = <String>{};
+      final dynamic state = channel.presenceState();
+      int count = 0;
 
-      // state is List<SinglePresenceState>
-      for (final userPresence in state) {
-        final payloads = (userPresence as dynamic).payloads as List<dynamic>?;
-        if (payloads != null) {
-          for (final payload in payloads) {
-            final pMap = payload as Map<String, dynamic>;
-            if (pMap['online'] == true && pMap['user_id'] != null) {
-              onlineUsers.add(pMap['user_id']);
-            }
+      final presences = <dynamic>[];
+      if (state is Map) {
+        for (var v in state.values) {
+          if (v is List) presences.addAll(v);
+        }
+      } else if (state is List) {
+        presences.addAll(state);
+      }
+
+      for (final presence in presences) {
+        Map<String, dynamic>? data;
+        try {
+          if (presence is Map) {
+            data = Map<String, dynamic>.from(presence);
+          } else {
+            data = (presence as dynamic).payload as Map<String, dynamic>?;
+          }
+        } catch (_) {
+          if (presence is Map<String, dynamic>) {
+            data = presence;
           }
         }
+
+        if (data != null && data['online'] == true) {
+          count++;
+        }
       }
-      if (!controller.isClosed) controller.add(onlineUsers.length);
+
+      if (!controller.isClosed) controller.add(count);
     }).subscribe();
 
     // Also need to track ourselves in this group when we watch it
@@ -600,8 +618,8 @@ class SupabaseChatRepository implements ChatRepository {
     return (profiles as List)
         .map((p) => {
               'id': p['id'],
-              'name': p['username'] ?? 'Unknown',
-              'avatar': p['avatar_url'],
+              'username': p['username'],
+              'avatar_url': p['avatar_url'],
             })
         .toList();
   }
@@ -722,5 +740,14 @@ class SupabaseChatRepository implements ChatRepository {
       await _supabase.from('profiles').delete().eq('id', user.id);
       await _supabase.auth.signOut();
     }
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getProfile(String userId) async {
+    return await _supabase
+        .from('profiles')
+        .select()
+        .eq('id', userId)
+        .maybeSingle();
   }
 }
