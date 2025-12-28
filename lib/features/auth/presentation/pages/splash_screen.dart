@@ -87,10 +87,31 @@ class _SplashScreenState extends State<SplashScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Image.asset(
-                  'assets/images/app_icon.png',
+                SizedBox(
                   width: 150,
                   height: 150,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: Image.asset(
+                          'assets/images/app_icon.png',
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      // Vignette to blend edges with background
+                      Container(
+                        decoration: const BoxDecoration(
+                          gradient: RadialGradient(
+                            colors: [
+                              Colors.transparent,
+                              GossipColors.background
+                            ],
+                            stops: [0.6, 1.0],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 24),
                 ShaderMask(

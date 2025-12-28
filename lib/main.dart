@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -19,9 +20,6 @@ import 'features/call/presentation/pages/incoming_call_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Firebase (Requires google-services.json / GoogleService-Info.plist)
-  await Firebase.initializeApp();
-
   await Supabase.initialize(
     url: SupabaseConstants.supabaseUrl,
     anonKey: SupabaseConstants.supabaseAnonKey,
@@ -29,8 +27,11 @@ void main() async {
 
   await di.init();
 
-  // Initialize Notifications
-  await di.sl<NotificationService>().initialize();
+  // Initialize Firebase & Notifications (Mobile Only)
+  if (Platform.isAndroid || Platform.isIOS) {
+    await Firebase.initializeApp();
+    await di.sl<NotificationService>().initialize();
+  }
 
   runApp(const GossipApp());
 }
