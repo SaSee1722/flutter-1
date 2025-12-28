@@ -87,6 +87,12 @@ class _SplashScreenState extends State<SplashScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                Image.asset(
+                  'assets/images/app_icon.png',
+                  width: 150,
+                  height: 150,
+                ),
+                const SizedBox(height: 24),
                 ShaderMask(
                   shaderCallback: (bounds) =>
                       GossipColors.primaryGradient.createShader(bounds),

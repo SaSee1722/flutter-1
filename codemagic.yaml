@@ -1,0 +1,98 @@
+workflows:
+  android-release:
+    name: Android Release
+    instance_type: mac_mini_m1
+    max_build_duration: 120
+    environment:
+      groups:
+        - google_credentials # Add your google-services.json content here as GOOGLE_SERVICES_JSON
+        - android_signing   # Add keystore details here
+      vars:
+        PACKAGE_NAME: "com.example.flutter_app" # Update with your actual package name
+      flutter: stable
+      xcode: latest
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
+      
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+
+      - name: Decode Keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > /tmp/keystore.jks
+
+      - name: Build Android Release
+        script: |
+          flutter build appbundle --release \
+            --build-name=1.0.0 \
+            --build-number=$(($BUILD_NUMBER + 100))
+
+    artifacts:
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/mapping.txt
+      - flutter_drive.log
+
+    publishing:
+      email:
+        recipients:
+          - user@example.com # Update with your email
+        notify:
+          success: true
+          failure: true
+
+  ios-release:
+    name: iOS Release
+    instance_type: mac_mini_m1
+    max_build_duration: 120
+    integrations:
+      app_store_connect: codemagic_api_key # Use the name you gave your API key in Codemagic UI
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.flutterApp # Update with your Bundle ID
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+
+      - name: Install CocoaPods dependencies
+        script: |
+          find . -name "Podfile" -execdir pod install \;
+
+      - name: Initialize Keychain
+        script: |
+          keychain initialize
+
+      - name: Set up code signing settings on Xcode project
+        script: |
+          xcode-project use-profiles
+
+      - name: Build iOS IPA
+        script: |
+          flutter build ipa --release \
+            --build-name=1.0.0 \
+            --build-number=$(($BUILD_NUMBER + 100)) \
+            --export-options-plist=/usr/local/share/workspace/export_options.plist
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - *.dSYM.zip
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true             # Optional: submit to TestFlight
+        # submit_to_app_store: false           # Optional: submit to App Store
+      email:
+        recipients:
+          - user@example.com
+        notify:
+          success: true
+          failure: true
