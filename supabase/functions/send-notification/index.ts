@@ -68,7 +68,7 @@ async function handleChatMessage(supabase: any, record: any, accessToken: string
         type: 'chat',
         chatId: roomId,
         senderName: senderName,
-    }, 'normal', accessToken, projectId)
+    }, 'high', accessToken, projectId)
 }
 
 async function handleIncomingCall(supabase: any, record: any, accessToken: string, projectId: string) {
