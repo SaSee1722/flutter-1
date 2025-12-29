@@ -34,6 +34,8 @@ serve(async (req) => {
             return await handleChatMessage(supabase, record, accessToken, firebaseKey.project_id)
         } else if (table === 'calls') {
             return await handleIncomingCall(supabase, record, accessToken, firebaseKey.project_id)
+        } else if (table === 'friend_requests') {
+            return await handleFriendRequest(supabase, record, accessToken, firebaseKey.project_id)
         }
 
         return new Response('Table not supported', { status: 200 })
@@ -94,6 +96,24 @@ async function handleIncomingCall(supabase: any, record: any, accessToken: strin
         callerAvatar: senderAvatar,
         callType: isVideo ? 'video' : 'audio',
     }, 'high', accessToken, projectId)
+}
+
+async function handleFriendRequest(supabase: any, record: any, accessToken: string, projectId: string) {
+    const senderId = record.sender_id
+    const receiverId = record.receiver_id
+
+    // Fetch sender details
+    const { data: senderProfile } = await supabase.from('profiles').select('username, avatar_url').eq('id', senderId).single()
+    const senderName = senderProfile?.username ?? 'Someone'
+    const senderAvatar = senderProfile?.avatar_url
+
+    // Send to receiver
+    return await sendToUsers(supabase, [receiverId], {
+        type: 'friend_request',
+        requestId: record.id,
+        senderName: senderName,
+        senderAvatar: senderAvatar,
+    }, 'normal', accessToken, projectId)
 }
 
 async function sendToUsers(supabase: any, userIds: string[], data: any, priority: string, accessToken: string, projectId: string) {

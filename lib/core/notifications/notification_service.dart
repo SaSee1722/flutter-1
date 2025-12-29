@@ -128,6 +128,8 @@ class NotificationService {
       await _showChatMessageNotification(data);
     } else if (type == 'call') {
       await _handleIncomingCallNotification(data);
+    } else if (type == 'friend_request') {
+      await _showFriendRequestNotification(data);
     }
   }
 
@@ -167,6 +169,35 @@ class NotificationService {
       'You have a message from $senderName',
       details,
       payload: chatId,
+    );
+  }
+
+  Future<void> _showFriendRequestNotification(Map<String, dynamic> data) async {
+    final senderName = data['senderName'] as String? ?? 'Someone';
+
+    const androidDetails = AndroidNotificationDetails(
+      'friend_requests',
+      'Friend Requests',
+      channelDescription: 'Notifications for new friend requests',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
+    const details =
+        NotificationDetails(android: androidDetails, iOS: iosDetails);
+
+    await _localNotifications.show(
+      DateTime.now().millisecond,
+      'New Friend Request',
+      '$senderName wants to be your friend!',
+      details,
+      payload: 'friend_request',
     );
   }
 
