@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/gossip_colors.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class GroupInfoScreen extends StatelessWidget {
   final String groupName;
@@ -59,7 +60,7 @@ class GroupInfoScreen extends StatelessWidget {
                 border: Border.all(color: GossipColors.primary, width: 2),
                 image: avatarUrl != null
                     ? DecorationImage(
-                        image: NetworkImage(avatarUrl!),
+                        image: CachedNetworkImageProvider(avatarUrl!),
                         fit: BoxFit.cover,
                       )
                     : null,

@@ -349,12 +349,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               ),
                             ),
-                            errorWidget: (context, url, error) => Image.network(
-                                'https://picsum.photos/seed/profile/300',
-                                fit: BoxFit.cover),
+                            errorWidget: (context, url, error) =>
+                                CachedNetworkImage(
+                                    imageUrl:
+                                        'https://picsum.photos/seed/profile/300',
+                                    fit: BoxFit.cover),
                           )
-                        : Image.network(
-                            'https://picsum.photos/seed/profile/300',
+                        : CachedNetworkImage(
+                            imageUrl: 'https://picsum.photos/seed/profile/300',
                             fit: BoxFit.cover),
               ),
             ),

@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gossip/core/di/injection_container.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
 import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:gossip/shared/utils/toast_utils.dart';
 
 class BlockedUsersScreen extends StatefulWidget {
@@ -96,7 +97,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                             backgroundColor:
                                 GossipColors.primary.withValues(alpha: 0.1),
                             backgroundImage: user['avatar_url'] != null
-                                ? NetworkImage(user['avatar_url'])
+                                ? CachedNetworkImageProvider(user['avatar_url'])
                                 : null,
                             child: user['avatar_url'] == null
                                 ? Text(user['username'][0].toUpperCase(),
