@@ -5,4 +5,5 @@ abstract class StatusRepository {
   Future<void> uploadStatus(XFile file, bool isVideo, {String? caption});
   Future<List<UserStatus>> getActiveStatuses();
   Future<void> deleteStatus(String statusId);
+  Future<void> markStatusViewed(String statusId);
 }

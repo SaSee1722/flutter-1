@@ -761,14 +761,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () async {
               Navigator.pop(context); // Close dialog
               try {
-                // Show confirmation one last time or just do it
+                // Show loading indicator
+                if (context.mounted) {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (context) => const Center(
+                        child: CircularProgressIndicator(
+                            color: GossipColors.primary)),
+                  );
+                }
+
                 await sl<ChatRepository>().deleteAccount();
+
                 if (!context.mounted) return;
-                // After deletion, BLoC will handle logout if it's listening to auth state
-                // but we should probably force a logout or navigate to onboarding
+                Navigator.pop(context); // Close loading indicator
+
+                ToastUtils.showSuccess(
+                    context, 'Successfully deleted your account');
+
+                // Small delay to let the toast be seen
+                await Future.delayed(const Duration(milliseconds: 500));
+                if (!context.mounted) return;
+
                 context.read<AuthBloc>().add(AuthLogoutRequested());
               } catch (e) {
                 if (!context.mounted) return;
+                try {
+                  Navigator.pop(context); // Close loading indicator if open
+                } catch (_) {}
                 ToastUtils.showError(context, 'Account deletion failed: $e');
               }
             },

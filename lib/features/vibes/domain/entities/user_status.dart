@@ -9,6 +9,7 @@ class UserStatus {
   final String? username;
   final String? avatarUrl;
   final int viewCount;
+  final bool isViewed; // NEW: Whether current user saw this
   final List<Map<String, String>> viewers; // Mock list of viewer profiles
 
   UserStatus({
@@ -22,10 +23,15 @@ class UserStatus {
     this.username,
     this.avatarUrl,
     this.viewCount = 0,
+    this.isViewed = false,
     this.viewers = const [],
   });
 
   factory UserStatus.fromJson(Map<String, dynamic> json) {
+    // Check if status_views has any entries (meaning current user viewed it)
+    final views = json['status_views'] as List?;
+    final isViewed = views != null && views.isNotEmpty;
+
     return UserStatus(
       id: json['id'],
       userId: json['user_id'],
@@ -36,7 +42,8 @@ class UserStatus {
       expiresAt: DateTime.parse(json['expires_at']),
       username: json['profiles']?['username'],
       avatarUrl: json['profiles']?['avatar_url'],
-      viewCount: json['view_count'] ?? 0, // Fallback if column missing
+      viewCount: json['view_count'] ?? 0,
+      isViewed: isViewed,
     );
   }
 }

@@ -7,11 +7,18 @@ import 'package:gossip/features/vibes/presentation/bloc/vibe_event.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:gossip/shared/widgets/gradient_text.dart';
 import 'package:flutter/foundation.dart';
+import 'package:video_player/video_player.dart';
+import 'dart:io' as io;
 
 class VibePreviewScreen extends StatefulWidget {
   final XFile file;
+  final bool isVideo;
 
-  const VibePreviewScreen({super.key, required this.file});
+  const VibePreviewScreen({
+    super.key,
+    required this.file,
+    required this.isVideo,
+  });
 
   @override
   State<VibePreviewScreen> createState() => _VibePreviewScreenState();
@@ -20,11 +27,34 @@ class VibePreviewScreen extends StatefulWidget {
 class _VibePreviewScreenState extends State<VibePreviewScreen> {
   final TextEditingController _captionController = TextEditingController();
   Uint8List? _imageBytes;
+  VideoPlayerController? _videoController;
 
   @override
   void initState() {
     super.initState();
-    _loadImage();
+    if (widget.isVideo) {
+      _initializeVideo();
+    } else {
+      _loadImage();
+    }
+  }
+
+  Future<void> _initializeVideo() async {
+    if (kIsWeb) {
+      _videoController =
+          VideoPlayerController.networkUrl(Uri.parse(widget.file.path));
+    } else {
+      _videoController = VideoPlayerController.file(io.File(widget.file.path));
+    }
+
+    try {
+      await _videoController!.initialize();
+      await _videoController!.setLooping(true);
+      await _videoController!.play();
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('Error initializing video: $e');
+    }
   }
 
   Future<void> _loadImage() async {
@@ -43,6 +73,7 @@ class _VibePreviewScreenState extends State<VibePreviewScreen> {
   @override
   void dispose() {
     _captionController.dispose();
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -51,10 +82,9 @@ class _VibePreviewScreenState extends State<VibePreviewScreen> {
           UploadVibe(
             widget.file,
             caption: _captionController.text,
+            isVideo: widget.isVideo,
           ),
         );
-    // Navigate back immediately, the bloc listener on the main screen will handle success/failure feedback if needed
-    // Or we could wait here. For now, let's close the preview.
     Navigator.pop(context);
   }
 
@@ -65,16 +95,28 @@ class _VibePreviewScreenState extends State<VibePreviewScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Image Preview
+          // Content Preview
           Positioned.fill(
-            child: _imageBytes != null
-                ? Image.memory(
-                    _imageBytes!,
-                    fit: BoxFit.contain,
-                  )
-                : const Center(
-                    child:
-                        CircularProgressIndicator(color: GossipColors.primary)),
+            child: widget.isVideo
+                ? (_videoController != null &&
+                        _videoController!.value.isInitialized
+                    ? Center(
+                        child: AspectRatio(
+                          aspectRatio: _videoController!.value.aspectRatio,
+                          child: VideoPlayer(_videoController!),
+                        ),
+                      )
+                    : const Center(
+                        child: CircularProgressIndicator(
+                            color: GossipColors.primary)))
+                : (_imageBytes != null
+                    ? Image.memory(
+                        _imageBytes!,
+                        fit: BoxFit.contain,
+                      )
+                    : const Center(
+                        child: CircularProgressIndicator(
+                            color: GossipColors.primary))),
           ),
 
           // Overlay Gradient

@@ -271,18 +271,24 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       UserStatus? myVibe;
                       final currentUserId =
                           Supabase.instance.client.auth.currentUser?.id;
-                      List<UserStatus> otherVibes = [];
+                      List<UserStatus> rawVibes = [];
 
                       if (state is VibesLoaded) {
+                        rawVibes = state.vibes;
                         try {
-                          myVibe = state.vibes
+                          myVibe = rawVibes
                               .firstWhere((v) => v.userId == currentUserId);
                         } catch (_) {}
-
-                        otherVibes = state.vibes
-                            .where((v) => v.userId != currentUserId)
-                            .toList();
                       }
+
+                      // Group other vibes by user
+                      final Map<String, List<UserStatus>> groupedVibes = {};
+                      for (var v in rawVibes) {
+                        if (v.userId == currentUserId) continue;
+                        groupedVibes.putIfAbsent(v.userId, () => []).add(v);
+                      }
+
+                      final otherUserIds = groupedVibes.keys.toList();
 
                       return Row(
                         children: [
@@ -302,19 +308,32 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 : _openVibeCreation,
                           ),
                           const SizedBox(width: 24),
-                          ...List.generate(otherVibes.length, (index) {
-                            final vibe = otherVibes[index];
+                          ...List.generate(otherUserIds.length, (index) {
+                            final userId = otherUserIds[index];
+                            final userVibes = groupedVibes[userId]!;
+                            final firstVibe = userVibes.first;
+
+                            // Check if ANY vibe in this user's group is unseen
+                            final hasUnseen = userVibes.any((v) => !v.isViewed);
+
+                            // Find the first unviewed vibe to start viewing from
+                            final startIdx =
+                                userVibes.indexWhere((v) => !v.isViewed);
+                            final initialIndex = startIdx == -1 ? 0 : startIdx;
+
                             return Row(
                               children: [
                                 _VibeItem(
-                                  label: vibe.username ?? 'User',
-                                  imageUrl: vibe.mediaUrl,
+                                  label: firstVibe.username ?? 'User',
+                                  imageUrl: firstVibe.mediaUrl,
+                                  isViewed: !hasUnseen, // Red if ALL viewed
                                   onTap: () => Navigator.push(
                                     context,
                                     MaterialPageRoute(
                                       builder: (_) => VibeViewScreen(
-                                          vibes: otherVibes,
-                                          initialIndex: index),
+                                        vibes: userVibes,
+                                        initialIndex: initialIndex,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -633,6 +652,7 @@ class _HeaderDoodle extends StatelessWidget {
 class _VibeItem extends StatelessWidget {
   final String label;
   final bool isYours;
+  final bool isViewed;
   final String? imageUrl;
   final VoidCallback? onTap;
   final VoidCallback? onAddTap;
@@ -640,6 +660,7 @@ class _VibeItem extends StatelessWidget {
   const _VibeItem({
     required this.label,
     this.isYours = false,
+    this.isViewed = false,
     this.imageUrl,
     this.onTap,
     this.onAddTap,
@@ -647,6 +668,14 @@ class _VibeItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Determine ring color
+    final Color ringColor;
+    if (isYours) {
+      ringColor = GossipColors.primary;
+    } else {
+      ringColor = isViewed ? Colors.red : Colors.greenAccent;
+    }
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -665,10 +694,8 @@ class _VibeItem extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: isYours
-                            ? GossipColors.primary
-                            : GossipColors.secondary,
-                        width: 2,
+                        color: ringColor,
+                        width: 2.5,
                       ),
                       image: imageUrl != null
                           ? DecorationImage(
@@ -678,10 +705,7 @@ class _VibeItem extends StatelessWidget {
                           : null,
                       boxShadow: [
                         BoxShadow(
-                          color: (isYours
-                                  ? GossipColors.primary
-                                  : GossipColors.secondary)
-                              .withValues(alpha: 0.2),
+                          color: ringColor.withValues(alpha: 0.2),
                           blurRadius: 10,
                           spreadRadius: 2,
                         ),
@@ -692,9 +716,7 @@ class _VibeItem extends StatelessWidget {
                             child: Text(
                               label[0].toUpperCase(),
                               style: TextStyle(
-                                color: isYours
-                                    ? GossipColors.primary
-                                    : GossipColors.secondary,
+                                color: ringColor,
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
                               ),

@@ -20,3 +20,12 @@ class UploadVibe extends VibeEvent {
   @override
   List<Object?> get props => [file, isVideo, caption];
 }
+
+class DeleteVibe extends VibeEvent {
+  final String statusId;
+
+  const DeleteVibe(this.statusId);
+
+  @override
+  List<Object?> get props => [statusId];
+}

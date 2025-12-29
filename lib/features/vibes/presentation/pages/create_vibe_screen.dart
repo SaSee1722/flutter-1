@@ -34,7 +34,7 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => VibePreviewScreen(file: image),
+            builder: (_) => VibePreviewScreen(file: image, isVideo: false),
           ),
         );
       }
@@ -45,6 +45,105 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
         );
       }
     }
+  }
+
+  Future<void> _pickVideo(ImageSource source) async {
+    try {
+      final XFile? video = await _picker.pickVideo(
+        source: source,
+        maxDuration: const Duration(seconds: 30),
+      );
+      if (video != null && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => VibePreviewScreen(file: video, isVideo: true),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+  }
+
+  void _showMediaOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: GossipColors.cardBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image, color: Colors.white),
+              title: const Text('Capture Image',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam, color: Colors.white),
+              title: const Text('Capture Video (Max 30s)',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideo(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.white),
+              title:
+                  const Text('Gallery', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                // We'll let the user choose image or video from gallery by showing another small choice or just picking image for simplicity
+                // Actually image_picker pickImage vs pickVideo are distinct.
+                _showGalleryOptions();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showGalleryOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: GossipColors.cardBackground,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image, color: Colors.white),
+              title: const Text('Image', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam, color: Colors.white),
+              title: const Text('Video', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideo(ImageSource.gallery);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -134,7 +233,7 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
             ],
           ),
           IconButton(
-            onPressed: () => _pickImage(ImageSource.camera),
+            onPressed: _showMediaOptions,
             icon: const Icon(Icons.camera_alt_outlined, color: Colors.white54),
             style: IconButton.styleFrom(
               backgroundColor: Colors.white.withValues(alpha: 0.1),
@@ -149,9 +248,7 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
 
   Widget _buildPostVibeCard() {
     return GestureDetector(
-      onTap: () {
-        _pickImage(ImageSource.gallery);
-      },
+      onTap: _showMediaOptions,
       child: Container(
         width: 120,
         height: 180,

@@ -44,10 +44,33 @@ class SupabaseStatusRepository implements StatusRepository {
 
   @override
   Future<List<UserStatus>> getActiveStatuses() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return [];
+
+    // 1. Fetch accepted friend IDs
+    final friendsData = await _supabase
+        .from('friend_requests')
+        .select('sender_id, receiver_id')
+        .or('sender_id.eq.${user.id},receiver_id.eq.${user.id}')
+        .eq('status', 'accepted');
+
+    final List<String> allowedIds = [user.id];
+    for (var item in (friendsData as List)) {
+      if (item['sender_id'] == user.id) {
+        allowedIds.add(item['receiver_id']);
+      } else {
+        allowedIds.add(item['sender_id']);
+      }
+    }
+
+    // 2. Fetch statuses ONLY from these IDs, joined with status_views for current user
     final response = await _supabase
         .from('statuses')
-        .select('*, profiles(*)')
-        .gt('expires_at', DateTime.now().toIso8601String())
+        .select('*, profiles(*), status_views!left(viewer_id)')
+        .inFilter('user_id', allowedIds)
+        .eq('status_views.viewer_id',
+            user.id) // Only join views by current user
+        .gt('expires_at', DateTime.now().toUtc().toIso8601String())
         .order('created_at', ascending: false);
 
     return (response as List).map((json) => UserStatus.fromJson(json)).toList();
@@ -56,5 +79,35 @@ class SupabaseStatusRepository implements StatusRepository {
   @override
   Future<void> deleteStatus(String statusId) async {
     await _supabase.from('statuses').delete().eq('id', statusId);
+  }
+
+  @override
+  Future<void> markStatusViewed(String statusId) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      // 1. Record specific view in status_views table
+      await _supabase.from('status_views').upsert({
+        'status_id': statusId,
+        'viewer_id': user.id,
+      });
+
+      // 2. Increment total view_count in statuses table
+      final data = await _supabase
+          .from('statuses')
+          .select('view_count, user_id')
+          .eq('id', statusId)
+          .maybeSingle();
+
+      if (data != null && data['user_id'] != user.id) {
+        final currentCount = data['view_count'] ?? 0;
+        await _supabase
+            .from('statuses')
+            .update({'view_count': currentCount + 1}).eq('id', statusId);
+      }
+    } catch (e) {
+      debugPrint('Error marking status as viewed: $e');
+    }
   }
 }

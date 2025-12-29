@@ -9,6 +9,7 @@ class VibeBloc extends Bloc<VibeEvent, VibeState> {
   VibeBloc(this._statusRepository) : super(VibeInitial()) {
     on<LoadVibes>(_onLoadVibes);
     on<UploadVibe>(_onUploadVibe);
+    on<DeleteVibe>(_onDeleteVibe);
   }
 
   Future<void> _onLoadVibes(LoadVibes event, Emitter<VibeState> emit) async {
@@ -27,6 +28,15 @@ class VibeBloc extends Bloc<VibeEvent, VibeState> {
       await _statusRepository.uploadStatus(event.file, event.isVideo,
           caption: event.caption);
       emit(VibeUploadSuccess());
+      add(LoadVibes());
+    } catch (e) {
+      emit(VibeError(e.toString()));
+    }
+  }
+
+  Future<void> _onDeleteVibe(DeleteVibe event, Emitter<VibeState> emit) async {
+    try {
+      await _statusRepository.deleteStatus(event.statusId);
       add(LoadVibes());
     } catch (e) {
       emit(VibeError(e.toString()));

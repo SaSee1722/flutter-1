@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -32,7 +32,9 @@ void main() async {
   di.sl<DeepLinkService>().initialize();
 
   // Initialize Firebase & Notifications (Mobile Only)
-  if (Platform.isAndroid || Platform.isIOS) {
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS)) {
     await Firebase.initializeApp();
     await di.sl<NotificationService>().initialize();
   }

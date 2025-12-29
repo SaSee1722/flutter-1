@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:gossip/features/chat/domain/entities/message.dart';
 import 'package:gossip/features/chat/domain/entities/chat_room.dart';
@@ -599,12 +600,16 @@ class SupabaseChatRepository implements ChatRepository {
           .inFilter('receiver_id', userIds.followedBy([user.id]).toList());
 
       for (var result in results) {
-        final request = (requests as List).firstWhere(
-          (r) =>
-              (r['sender_id'] == user.id && r['receiver_id'] == result['id']) ||
-              (r['receiver_id'] == user.id && r['sender_id'] == result['id']),
-          orElse: () => null,
-        );
+        final request =
+            (requests as List).cast<Map<String, dynamic>?>().firstWhere(
+                  (r) =>
+                      r != null &&
+                      ((r['sender_id'] == user.id &&
+                              r['receiver_id'] == result['id']) ||
+                          (r['receiver_id'] == user.id &&
+                              r['sender_id'] == result['id'])),
+                  orElse: () => null,
+                );
 
         if (request != null) {
           result['friendship_status'] = request['status'];
@@ -759,14 +764,56 @@ class SupabaseChatRepository implements ChatRepository {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
 
-    // Call RPC function to delete auth record
-    // This requires the RPC function to be created in Supabase
+    final userId = user.id;
+
+    // 1. Clean up Storage Buckets
+    final buckets = [
+      'avatars',
+      'vibe-media',
+      'chat-media',
+      'chat-documents',
+      'chat-audio',
+      'group_avatars'
+    ];
+
+    for (final bucket in buckets) {
+      try {
+        // List all files in the user's folder
+        final files = await _supabase.storage.from(bucket).list(path: userId);
+        if (files.isNotEmpty) {
+          final pathsToDelete =
+              files.map((file) => '$userId/${file.name}').toList();
+          await _supabase.storage.from(bucket).remove(pathsToDelete);
+        }
+      } catch (e) {
+        debugPrint('Error cleaning up bucket $bucket: $e');
+      }
+    }
+
+    // 2. Delete data from tables (most should be handled by CASCADE, but for safety)
+    try {
+      // Delete statuses/vibes
+      await _supabase.from('statuses').delete().eq('user_id', userId);
+      // Delete friend requests
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .or('sender_id.eq.$userId,receiver_id.eq.$userId');
+      // Delete messages
+      await _supabase.from('messages').delete().eq('user_id', userId);
+    } catch (e) {
+      debugPrint('Error cleaning up tables: $e');
+    }
+
+    // 3. Call RPC function to delete auth record (which should delete profile via trigger/cascade)
     try {
       await _supabase.rpc('delete_user');
       await _supabase.auth.signOut();
     } catch (e) {
-      // Fallback: delete profile if RPC fails (security definer issues)
-      await _supabase.from('profiles').delete().eq('id', user.id);
+      // Fallback: delete profile if RPC fails or is missing
+      try {
+        await _supabase.from('profiles').delete().eq('id', userId);
+      } catch (_) {}
       await _supabase.auth.signOut();
     }
   }

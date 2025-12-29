@@ -3,6 +3,13 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
 import 'package:gossip/features/vibes/domain/entities/user_status.dart';
+import 'package:video_player/video_player.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:gossip/features/vibes/presentation/bloc/vibe_bloc.dart';
+import 'package:gossip/features/vibes/presentation/bloc/vibe_event.dart';
+import 'package:gossip/core/di/injection_container.dart';
+import 'package:gossip/features/vibes/domain/repositories/status_repository.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 class VibeViewScreen extends StatefulWidget {
   final List<UserStatus> vibes;
@@ -21,6 +28,7 @@ class VibeViewScreen extends StatefulWidget {
 class _VibeViewScreenState extends State<VibeViewScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _progressController;
+  VideoPlayerController? _videoController;
   late int _currentIndex;
 
   UserStatus get _currentVibe => widget.vibes[_currentIndex];
@@ -29,22 +37,40 @@ class _VibeViewScreenState extends State<VibeViewScreen>
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    _progressController = AnimationController(vsync: this);
     _startTimer();
   }
 
-  void _startTimer() {
-    // 30s for video, 10s for image
-    final duration = _currentVibe.isVideo
-        ? const Duration(seconds: 30)
-        : const Duration(seconds: 15);
+  Future<void> _startTimer() async {
+    _progressController.stop();
+    _progressController.reset();
 
-    // Initialize controller if not already done, or reset it
-    _progressController = AnimationController(
-      vsync: this,
-      duration: duration,
-    );
+    await _videoController?.dispose();
+    _videoController = null;
+
+    if (_currentVibe.isVideo) {
+      _videoController =
+          VideoPlayerController.networkUrl(Uri.parse(_currentVibe.mediaUrl));
+      try {
+        await _videoController!.initialize();
+        // Limit to 30s if longer, or use video duration
+        final duration =
+            _videoController!.value.duration > const Duration(seconds: 30)
+                ? const Duration(seconds: 30)
+                : _videoController!.value.duration;
+
+        _progressController.duration = duration;
+        await _videoController!.play();
+        if (mounted) setState(() {});
+      } catch (e) {
+        _progressController.duration = const Duration(seconds: 15);
+      }
+    } else {
+      _progressController.duration = const Duration(seconds: 15);
+    }
 
     _progressController.forward().whenComplete(_nextVibe);
+    _markViewed(); // Mark as viewed when starting the timer
   }
 
   void _nextVibe() {
@@ -53,7 +79,6 @@ class _VibeViewScreenState extends State<VibeViewScreen>
       setState(() {
         _currentIndex++;
       });
-      _progressController.dispose();
       _startTimer();
     } else {
       Navigator.pop(context);
@@ -66,17 +91,18 @@ class _VibeViewScreenState extends State<VibeViewScreen>
       setState(() {
         _currentIndex--;
       });
-      _progressController.dispose();
       _startTimer();
     } else {
-      // Restart current if first
       _progressController.forward(from: 0);
+      _videoController?.seekTo(Duration.zero);
+      _videoController?.play();
     }
   }
 
   @override
   void dispose() {
     _progressController.dispose();
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -87,7 +113,7 @@ class _VibeViewScreenState extends State<VibeViewScreen>
     if (tapPosition < screenWidth / 3) {
       _prevVibe();
     } else {
-      _nextVibe(); // Right side or center proceeds to next
+      _nextVibe();
     }
   }
 
@@ -98,10 +124,23 @@ class _VibeViewScreenState extends State<VibeViewScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
-        onTapDown: (_) => _progressController.stop(),
-        onTapUp: _handleTap,
-        onLongPress: () => _progressController.stop(),
-        onLongPressEnd: (_) => _progressController.forward(),
+        onTapDown: (_) {
+          _progressController.stop();
+          _videoController?.pause();
+        },
+        onTapUp: (details) {
+          _handleTap(details);
+          _progressController.forward();
+          _videoController?.play();
+        },
+        onLongPress: () {
+          _progressController.stop();
+          _videoController?.pause();
+        },
+        onLongPressEnd: (_) {
+          _progressController.forward();
+          _videoController?.play();
+        },
         onVerticalDragEnd: (details) {
           if (details.primaryVelocity! > 0) {
             Navigator.pop(context);
@@ -111,17 +150,26 @@ class _VibeViewScreenState extends State<VibeViewScreen>
           children: [
             // Content
             Center(
-              child: CachedNetworkImage(
-                imageUrl: vibe.mediaUrl,
-                fit: BoxFit.scaleDown,
-                placeholder: (context, url) => const Center(
-                  child: CircularProgressIndicator(
-                    color: GossipColors.primary,
-                  ),
-                ),
-                errorWidget: (context, _, __) =>
-                    const Icon(Icons.broken_image, color: Colors.white),
-              ),
+              child: vibe.isVideo
+                  ? (_videoController != null &&
+                          _videoController!.value.isInitialized
+                      ? AspectRatio(
+                          aspectRatio: _videoController!.value.aspectRatio,
+                          child: VideoPlayer(_videoController!),
+                        )
+                      : const CircularProgressIndicator(
+                          color: GossipColors.primary))
+                  : CachedNetworkImage(
+                      imageUrl: vibe.mediaUrl,
+                      fit: BoxFit.scaleDown,
+                      placeholder: (context, url) => const Center(
+                        child: CircularProgressIndicator(
+                          color: GossipColors.primary,
+                        ),
+                      ),
+                      errorWidget: (context, _, __) =>
+                          const Icon(Icons.broken_image, color: Colors.white),
+                    ),
             ),
 
             // Gradient Overlay
@@ -198,6 +246,20 @@ class _VibeViewScreenState extends State<VibeViewScreen>
               ),
             ),
 
+            // Top Bar additions
+            Positioned(
+              top: 54,
+              right: 64, // To the left of close button
+              child: vibe.userId ==
+                      Supabase.instance.client.auth.currentUser?.id
+                  ? IconButton(
+                      icon:
+                          const Icon(Icons.delete_outline, color: Colors.white),
+                      onPressed: () => _confirmDelete(context, vibe),
+                    )
+                  : const SizedBox(),
+            ),
+
             // Close Button
             Positioned(
               top: 54,
@@ -231,31 +293,83 @@ class _VibeViewScreenState extends State<VibeViewScreen>
                 ),
               ).animate().fadeIn().slideY(begin: 0.2, end: 0),
 
-            // Viewer Stats (Only for owner - logic: if vibe.userId matches current user...
-            // but we don't have auth here easily. Assuming only "My Vibe" view passes [myVibe] list
-            // or check viewCount logic if needed. For now preserving the sheet logic but triggered differently?
-            // Actually, I'll put the eye icon back but controlled by checking if viewCount > 0 or consistent with previous logic.
-            // Wait, previous logic passed `isMine`. Now we have a list where some might be mine, some not?
-            // Or usually we view "My Vibe" separately.
-            // If I view "Others", I see others.
-            // If I click "My Vibe", I see mine.
-            // I will conditionally show the eye if viewCount is available/relevant.
-            // Actually, simplest is to just show it if viewCount > 0 OR always show it but it only makes sense for the owner.
-            // Since I can't easily check 'owner' without Auth here, I'll omit it for 'others' navigation for now unless requested again.
-            // BUT user asked for "viewing will be also 30 secs...".
-            // I will implement the eye icon logic if I can.
-            // Re-reading user request: "remove the mock datas in the viewrs..." was for previous turn.
-            // For this turn, he wants navigation.
-            // I'll add the eye button back but only show it if the screen was opened in "My Vibe" mode?
-            // No, the list is mixed? No, usually distinct.
-            // I'll skip the eye button for this particular rewrite unless I see a clear way to distinguish.
-            // Wait, "My Vibe" is just a list of 1. "Others" is a list of N.
-            // I can try to pass `isMine` but that applies to the whole list?
-            // Yes, typically.
+            // Viewer Stats (Eye icon)
+            Positioned(
+              bottom: 40,
+              left: 0,
+              right: 0,
+              child:
+                  vibe.userId == Supabase.instance.client.auth.currentUser?.id
+                      ? Column(
+                          children: [
+                            const Icon(Icons.remove_red_eye_outlined,
+                                color: Colors.white, size: 24),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${vibe.viewCount} Views',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        )
+                      : const SizedBox(),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  void _confirmDelete(BuildContext context, UserStatus vibe) {
+    _progressController.stop();
+    _videoController?.pause();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: GossipColors.cardBackground,
+        title:
+            const Text('Delete Vibe?', style: TextStyle(color: Colors.white)),
+        content: const Text('Are you sure you want to remove this vibe?',
+            style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _progressController.forward();
+              _videoController?.play();
+            },
+            child:
+                const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () {
+              try {
+                // Use the parent context to access the bloc
+                context.read<VibeBloc>().add(DeleteVibe(vibe.id));
+              } catch (e) {
+                // Fallback
+                sl<StatusRepository>().deleteStatus(vibe.id);
+              }
+              Navigator.pop(dialogContext); // Close dialog
+              Navigator.pop(context); // Close vibe view
+            },
+            child: const Text('DELETE', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _markViewed() async {
+    final vibe = _currentVibe;
+    final myId = Supabase.instance.client.auth.currentUser?.id;
+    if (vibe.userId != myId) {
+      await sl<StatusRepository>().markStatusViewed(vibe.id);
+    }
   }
 
   String _timeAgo(DateTime dateTime) {
