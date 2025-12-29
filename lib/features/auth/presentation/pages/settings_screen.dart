@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -43,6 +44,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Map<String, dynamic>? _profileData;
   bool _isLoadingProfile = true;
+  bool _isSaving = false;
+  bool _isPublic = true;
+  XFile? _localAvatarFile;
 
   @override
   void initState() {
@@ -74,6 +78,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _phoneController.text = response['phone'] ?? '';
             _bioController.text = response['bio'] ?? '';
             _selectedGender = response['gender'];
+            _isPublic = response['is_public'] ?? true;
             _isLoadingProfile = false;
           });
         }
@@ -135,9 +140,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   try {
                     final XFile? image = await _picker.pickImage(
                       source: ImageSource.camera,
-                      maxWidth: 512,
-                      maxHeight: 512,
-                      imageQuality: 75,
+                      maxWidth: 256,
+                      maxHeight: 256,
+                      imageQuality: 60,
                     );
                     if (image != null) _updateAvatar(image);
                   } catch (e) {
@@ -157,9 +162,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 try {
                   final XFile? image = await _picker.pickImage(
                     source: ImageSource.gallery,
-                    maxWidth: 512,
-                    maxHeight: 512,
-                    imageQuality: 75,
+                    maxWidth: 256,
+                    maxHeight: 256,
+                    imageQuality: 60,
                   );
                   if (image != null) {
                     _updateAvatar(image);
@@ -178,8 +183,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _updateAvatar(XFile file) {
+    setState(() => _localAvatarFile = file);
     context.read<AuthBloc>().add(AuthProfileUpdateRequested(avatarFile: file));
-    // Removed redundant _fetchProfile call and delay to prevent loop
+  }
+
+  Future<void> _toggleVisibility(bool value) async {
+    setState(() => _isPublic = value);
+    context.read<AuthBloc>().add(AuthProfileUpdateRequested(isPublic: value));
   }
 
   void _shareProfile() {
@@ -195,13 +205,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     final message =
-        "Hey! Let's talk on GOSSIP. Add me by clicking here:\ngossip://profile/$username\n\nor search for my username: $username\nMy name is $name.";
+        "Hey! Let's talk on GOSSIP. Add me by clicking here:\nhttps://gossip-messenger.web.app/profile/$username\n\nor search for my username: $username\nMy name is $name.";
 
     // ignore: deprecated_member_use
     Share.share(message);
   }
 
   void _saveChanges() {
+    setState(() => _isSaving = true);
     context.read<AuthBloc>().add(AuthProfileUpdateRequested(
           fullName: _fullNameController.text,
           username: _usernameController.text,
@@ -257,8 +268,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     (route) => false,
                   );
                 } else if (state is AuthAuthenticated) {
-                  // _fetchProfile(); // Already fetched in initState
+                  if (_localAvatarFile != null) {
+                    setState(() => _localAvatarFile = null);
+                    ToastUtils.showSuccess(
+                        context, 'Avatar updated successfully');
+                  }
+                  if (_isSaving) {
+                    ToastUtils.showSuccess(
+                        context, 'Profile updated successfully');
+                    _isSaving = false;
+                  }
                 } else if (state is AuthFailure) {
+                  setState(() {
+                    _isSaving = false;
+                    _localAvatarFile = null;
+                  });
                   ToastUtils.showError(context, state.message);
                 }
               },
@@ -325,25 +349,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 border: Border.all(color: Colors.white24, width: 2),
               ),
               child: ClipOval(
-                child: avatarUrl != null
-                    ? CachedNetworkImage(
-                        imageUrl: avatarUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(
-                          color: Colors.white.withValues(alpha: 0.05),
-                          child: const Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: GossipColors.primary,
+                child: _localAvatarFile != null
+                    ? (kIsWeb
+                        ? Image.network(_localAvatarFile!.path,
+                            fit: BoxFit.cover)
+                        : Image.file(File(_localAvatarFile!.path),
+                            fit: BoxFit.cover))
+                    : avatarUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: avatarUrl,
+                            fit: BoxFit.cover,
+                            placeholder: (context, url) => Container(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: GossipColors.primary,
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                        errorWidget: (context, url, error) => Image.network(
+                            errorWidget: (context, url, error) => Image.network(
+                                'https://picsum.photos/seed/profile/300',
+                                fit: BoxFit.cover),
+                          )
+                        : Image.network(
                             'https://picsum.photos/seed/profile/300',
                             fit: BoxFit.cover),
-                      )
-                    : Image.network('https://picsum.photos/seed/profile/300',
-                        fit: BoxFit.cover),
               ),
             ),
             Positioned(
@@ -662,6 +693,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   label: _t('notifications'),
                   value: true,
                   onChanged: (v) {}),
+              _SettingsToggle(
+                  icon: _isPublic
+                      ? Icons.visibility_rounded
+                      : Icons.visibility_off_rounded,
+                  label: _t('public_visibility'),
+                  value: _isPublic,
+                  onChanged: _toggleVisibility),
               GestureDetector(
                 onTap: () {
                   Navigator.push(

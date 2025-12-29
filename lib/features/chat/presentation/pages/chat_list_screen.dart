@@ -39,9 +39,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<ChatBloc>().add(LoadRooms());
-    context.read<VibeBloc>().add(LoadVibes());
-    _fetchMyProfile();
+    // Delay data loading to allow UI to render first and prevent jank
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        context.read<ChatBloc>().add(LoadRooms());
+        context.read<VibeBloc>().add(LoadVibes());
+        _fetchMyProfile();
+      }
+    });
   }
 
   Future<void> _fetchMyProfile() async {
@@ -222,13 +227,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   Widget _buildVibesSection() {
     return BlocBuilder<VibeBloc, VibeState>(
+      buildWhen: (previous, current) =>
+          current is VibesLoaded || current is VibeInitial,
       builder: (context, state) {
+        List<UserStatus> rawVibes = [];
+        if (state is VibesLoaded) {
+          rawVibes = state.vibes;
+        }
+
         return Container(
           width: double.infinity,
-          margin: const EdgeInsets.symmetric(vertical: 16),
+          margin: const EdgeInsets.symmetric(vertical: 8),
           padding: const EdgeInsets.symmetric(vertical: 20),
           decoration: BoxDecoration(
-            color: GossipColors.cardBackground.withValues(alpha: 0.5),
+            color: GossipColors.cardBackground.withValues(alpha: 0.3),
             border: Border.symmetric(
               horizontal:
                   BorderSide(color: Colors.white.withValues(alpha: 0.05)),
@@ -239,25 +251,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    GradientText(
-                      'VIBES.',
-                      gradient: GossipColors.primaryGradient,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-                    if (state is VibeLoading)
-                      const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                  ],
+                child: GradientText(
+                  'VIBES.',
+                  gradient: GossipColors.primaryGradient,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -268,18 +269,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 child: Row(
                   children: [
                     Builder(builder: (context) {
-                      UserStatus? myVibe;
                       final currentUserId =
                           Supabase.instance.client.auth.currentUser?.id;
-                      List<UserStatus> rawVibes = [];
-
-                      if (state is VibesLoaded) {
-                        rawVibes = state.vibes;
-                        try {
-                          myVibe = rawVibes
-                              .firstWhere((v) => v.userId == currentUserId);
-                        } catch (_) {}
-                      }
+                      UserStatus? myVibe;
+                      try {
+                        myVibe = rawVibes
+                            .firstWhere((v) => v.userId == currentUserId);
+                      } catch (_) {}
 
                       // Group other vibes by user
                       final Map<String, List<UserStatus>> groupedVibes = {};
@@ -295,16 +291,29 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           _VibeItem(
                             label: 'Your Vibe',
                             isYours: true,
-                            imageUrl: myVibe?.mediaUrl ?? _myAvatarUrl,
+                            imageUrl: (myVibe?.mediaUrl != null &&
+                                    myVibe!.mediaUrl.isNotEmpty)
+                                ? myVibe.mediaUrl
+                                : (_myAvatarUrl != null &&
+                                        _myAvatarUrl!.isNotEmpty
+                                    ? _myAvatarUrl
+                                    : null),
                             onAddTap: _openVibeCreation,
                             onTap: myVibe != null
-                                ? () => Navigator.push(
+                                ? () {
+                                    final vibeBloc = context.read<VibeBloc>();
+                                    Navigator.push(
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => VibeViewScreen(
                                             vibes: [myVibe!], initialIndex: 0),
                                       ),
-                                    )
+                                    ).then((_) {
+                                      if (mounted) {
+                                        vibeBloc.add(LoadVibes());
+                                      }
+                                    });
+                                  }
                                 : _openVibeCreation,
                           ),
                           const SizedBox(width: 24),
@@ -312,21 +321,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             final userId = otherUserIds[index];
                             final userVibes = groupedVibes[userId]!;
                             final firstVibe = userVibes.first;
-
-                            // Check if ANY vibe in this user's group is unseen
                             final hasUnseen = userVibes.any((v) => !v.isViewed);
-
-                            // Find the first unviewed vibe to start viewing from
                             final startIdx =
                                 userVibes.indexWhere((v) => !v.isViewed);
                             final initialIndex = startIdx == -1 ? 0 : startIdx;
 
+                            final vibeBloc = context.read<VibeBloc>();
                             return Row(
                               children: [
                                 _VibeItem(
                                   label: firstVibe.username ?? 'User',
-                                  imageUrl: firstVibe.mediaUrl,
-                                  isViewed: !hasUnseen, // Red if ALL viewed
+                                  imageUrl: (firstVibe.mediaUrl.isNotEmpty)
+                                      ? firstVibe.mediaUrl
+                                      : null,
+                                  isViewed: !hasUnseen,
                                   onTap: () => Navigator.push(
                                     context,
                                     MaterialPageRoute(
@@ -335,7 +343,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                         initialIndex: initialIndex,
                                       ),
                                     ),
-                                  ),
+                                  ).then((_) {
+                                    if (mounted) {
+                                      vibeBloc.add(LoadVibes());
+                                    }
+                                  }),
                                 ),
                                 const SizedBox(width: 24),
                               ],
@@ -358,7 +370,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const CreateVibeScreen()),
-    );
+    ).then((_) {
+      if (mounted) context.read<VibeBloc>().add(LoadVibes());
+    });
   }
 
   Widget _buildChatSection(BuildContext context) {
@@ -429,7 +443,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                   final storedPin = prefs.getString('app_pin');
                                   if (pin == storedPin) {
                                     Navigator.pop(ctx); // Close pin screen
-                                    // Allow navigation
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -576,10 +589,12 @@ class _NotificationSheetState extends State<_NotificationSheet> {
                           CircleAvatar(
                             radius: 20,
                             backgroundColor: Colors.white12,
-                            backgroundImage: req.senderAvatar != null
+                            backgroundImage: req.senderAvatar != null &&
+                                    req.senderAvatar!.isNotEmpty
                                 ? CachedNetworkImageProvider(req.senderAvatar!)
                                 : null,
-                            child: req.senderAvatar == null
+                            child: (req.senderAvatar == null ||
+                                    req.senderAvatar!.isEmpty)
                                 ? Text(req.senderName[0].toUpperCase())
                                 : null,
                           ),
@@ -676,6 +691,8 @@ class _VibeItem extends StatelessWidget {
       ringColor = isViewed ? Colors.red : Colors.greenAccent;
     }
 
+    final bool hasValidImage = imageUrl != null && imageUrl!.isNotEmpty;
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -697,7 +714,7 @@ class _VibeItem extends StatelessWidget {
                         color: ringColor,
                         width: 2.5,
                       ),
-                      image: imageUrl != null
+                      image: hasValidImage
                           ? DecorationImage(
                               image: CachedNetworkImageProvider(imageUrl!),
                               fit: BoxFit.cover,
@@ -711,10 +728,10 @@ class _VibeItem extends StatelessWidget {
                         ),
                       ],
                     ),
-                    child: imageUrl == null
+                    child: !hasValidImage
                         ? Center(
                             child: Text(
-                              label[0].toUpperCase(),
+                              label.isEmpty ? "?" : label[0].toUpperCase(),
                               style: TextStyle(
                                 color: ringColor,
                                 fontSize: 24,

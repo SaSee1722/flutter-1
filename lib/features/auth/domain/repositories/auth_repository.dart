@@ -24,6 +24,7 @@ abstract class AuthRepository {
     String? phone,
     String? gender,
     String? bio,
+    bool? isPublic,
   });
 
   Future<String?> updateAvatar(XFile imageFile);

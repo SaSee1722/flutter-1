@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../../data/webrtc_service.dart';
 import '../../domain/repositories/call_repository.dart';
 import '../../../chat/domain/repositories/chat_repository.dart';
+import '../../../../core/services/call_sound_service.dart';
 import 'call_event.dart';
 import 'call_state.dart';
 
@@ -12,6 +13,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
   final WebRTCService _webRTCService;
   final CallRepository _callRepository;
   final ChatRepository _chatRepository;
+  final CallSoundService _soundService;
   String? _currentUserId;
   Map<String, dynamic>? _currentUserProfile;
   StreamSubscription? _incomingCallsSub;
@@ -27,9 +29,11 @@ class CallBloc extends Bloc<CallEvent, CallState> {
     required WebRTCService webRTCService,
     required CallRepository callRepository,
     required ChatRepository chatRepository,
+    required CallSoundService soundService,
   })  : _webRTCService = webRTCService,
         _callRepository = callRepository,
         _chatRepository = chatRepository,
+        _soundService = soundService,
         super(CallIdle()) {
     _initRenderers();
 
@@ -143,6 +147,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
       ));
 
       _startTimeoutTimer();
+      await _soundService.playRinging();
     } catch (e) {
       emit(CallError(e.toString()));
     }
@@ -200,6 +205,8 @@ class CallBloc extends Bloc<CallEvent, CallState> {
       isIncoming: true,
     ));
     _startTimeoutTimer();
+    // Use system ringtone via CallKit usually, but if custom in-app handling needed:
+    // _soundService.playRinging();
   }
 
   Future<void> _onAnswerCall(AnswerCall event, Emitter<CallState> emit) async {
@@ -244,6 +251,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
         lastUpdate: DateTime.now(),
       ));
       _startCallTimer();
+      await _soundService.playConnected();
     } catch (e) {
       emit(CallError(e.toString()));
     }
@@ -265,6 +273,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
     await _callRepository.endCall(event.callId, duration: duration);
     _cleanup();
     emit(CallEnded());
+    await _soundService.playEnded();
     await Future.delayed(const Duration(seconds: 1));
     emit(CallIdle());
   }
@@ -346,6 +355,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
         lastUpdate: DateTime.now(),
       ));
       _startCallTimer();
+      await _soundService.playConnected();
     }
   }
 
@@ -429,6 +439,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
       emit(const CallError("Call rejected"));
     } else {
       emit(CallEnded());
+      await _soundService.playEnded();
     }
     await Future.delayed(const Duration(seconds: 2));
     if (!emit.isDone) {
@@ -437,6 +448,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
   }
 
   void _cleanup() {
+    _soundService.stop();
     _stopTimeoutTimer();
     _stopCallTimer();
     _webRTCService.dispose();

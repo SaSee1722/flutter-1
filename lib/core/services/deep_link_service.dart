@@ -27,13 +27,22 @@ class DeepLinkService {
   void _handleUri(Uri uri) {
     debugPrint('Received Deep Link: $uri');
 
-    // gossip://profile/[username]
+    // Simplified handling for both custom scheme and https links
+    String? username;
+
     if (uri.scheme == 'gossip' && uri.host == 'profile') {
-      final username =
-          uri.pathSegments.isNotEmpty ? uri.pathSegments.first : null;
-      if (username != null) {
-        _navigateToProfile(username);
+      // gossip://profile/[username]
+      username = uri.pathSegments.isNotEmpty ? uri.pathSegments.first : null;
+    } else if ((uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host == 'gossip-messenger.web.app') {
+      // https://gossip-messenger.web.app/profile/[username]
+      if (uri.pathSegments.length >= 2 && uri.pathSegments[0] == 'profile') {
+        username = uri.pathSegments[1];
       }
+    }
+
+    if (username != null) {
+      _navigateToProfile(username);
     }
   }
 

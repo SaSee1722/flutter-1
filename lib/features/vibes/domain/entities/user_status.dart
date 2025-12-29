@@ -28,9 +28,8 @@ class UserStatus {
   });
 
   factory UserStatus.fromJson(Map<String, dynamic> json) {
-    // Check if status_views has any entries (meaning current user viewed it)
-    final views = json['status_views'] as List?;
-    final isViewed = views != null && views.isNotEmpty;
+    // We now use the pre-computed flag from the repository mapping
+    final isViewed = json['is_viewed_by_me'] ?? false;
 
     return UserStatus(
       id: json['id'],

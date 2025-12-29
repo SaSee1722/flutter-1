@@ -14,6 +14,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<LoadRooms>(_onLoadRooms);
     on<LoadMessages>(_onLoadMessages);
     on<SendMessageRequested>(_onSendMessageRequested);
+    on<UpdateReactionRequest>(_onUpdateReactionRequested);
     on<MessagesUpdated>(_onMessagesUpdated);
     on<RoomsUpdated>(_onRoomsUpdated);
   }
@@ -84,6 +85,20 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           message.userId != _chatRepository.currentUser?.id) {
         _chatRepository.markAsDelivered(message.id);
       }
+    }
+  }
+
+  Future<void> _onUpdateReactionRequested(
+    UpdateReactionRequest event,
+    Emitter<ChatState> emit,
+  ) async {
+    try {
+      await _chatRepository.updateMessageReaction(
+          event.messageId, event.reaction);
+    } catch (e) {
+      // Quietly fail or show a toast? For reactions, usually quiet fail is better UI
+      // or revert optimistic update (if we had one)
+      // emit(state.copyWith(error: "Failed to react: $e"));
     }
   }
 

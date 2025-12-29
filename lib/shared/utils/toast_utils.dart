@@ -12,7 +12,15 @@ class ToastUtils {
       behavior: SnackBarBehavior.floating,
       backgroundColor: Colors.transparent,
       padding: EdgeInsets.zero,
-      margin: const EdgeInsets.fromLTRB(24, 0, 24, 40),
+      // Move to top by using a large margin at the bottom or just positioning
+      // SnackBar doesn't easily move to top in standard Flutter without a custom overlay,
+      // but we can use alignment in the content and a top-aligned container.
+      margin: EdgeInsets.only(
+        bottom: MediaQuery.of(context).size.height -
+            140, // Top margin hack for SnackBar
+        left: 24,
+        right: 24,
+      ),
       content: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: BackdropFilter(
@@ -20,51 +28,68 @@ class ToastUtils {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: const Color(0xFF1A1A1A).withValues(alpha: 0.6),
+              color: const Color(0xFF1A1A1A).withValues(alpha: 0.8),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: isError
-                    ? Colors.red.withValues(alpha: 0.3)
-                    : GossipColors.primary.withValues(alpha: 0.3),
-                width: 1,
+                    ? Colors.red.withValues(alpha: 0.5)
+                    : GossipColors.primary.withValues(alpha: 0.5),
+                width: 1.5,
               ),
               boxShadow: [
                 BoxShadow(
                   color: (isError ? Colors.red : GossipColors.primary)
-                      .withValues(alpha: 0.1),
-                  blurRadius: 10,
-                  spreadRadius: 2,
+                      .withValues(alpha: 0.2),
+                  blurRadius: 20,
+                  spreadRadius: 5,
                 )
               ],
             ),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(6),
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     color: (isError ? Colors.red : GossipColors.primary)
-                        .withValues(alpha: 0.1),
+                        .withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     isError
                         ? Icons.error_outline_rounded
-                        : Icons.info_outline_rounded,
+                        : Icons.check_circle_outline_rounded,
                     color: isError ? Colors.redAccent : GossipColors.primary,
-                    size: 18,
+                    size: 20,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 16),
                 Expanded(
-                  child: Text(
-                    message,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.3,
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isError ? 'GOSSIP ERROR' : 'GOSSIP SUCCESS',
+                        style: TextStyle(
+                          color: (isError
+                              ? Colors.redAccent
+                              : GossipColors.primary),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        message,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.1,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -72,7 +97,7 @@ class ToastUtils {
           ),
         ),
       ),
-      duration: const Duration(seconds: 3),
+      duration: const Duration(seconds: 4),
     );
 
     ScaffoldMessenger.of(context).showSnackBar(snackBar);

@@ -25,7 +25,6 @@ class SupabaseStatusRepository implements StatusRepository {
           fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
         );
 
-    // ...
     final mediaUrl =
         _supabase.storage.from('vibe-media').getPublicUrl(filePath);
 
@@ -64,16 +63,25 @@ class SupabaseStatusRepository implements StatusRepository {
     }
 
     // 2. Fetch statuses ONLY from these IDs, joined with status_views for current user
+    // We join status_views but we DON'T filter at top level to keep unviewed ones visible.
     final response = await _supabase
         .from('statuses')
-        .select('*, profiles(*), status_views!left(viewer_id)')
+        .select('*, profiles(*), status_views(viewer_id)')
         .inFilter('user_id', allowedIds)
-        .eq('status_views.viewer_id',
-            user.id) // Only join views by current user
         .gt('expires_at', DateTime.now().toUtc().toIso8601String())
         .order('created_at', ascending: false);
 
-    return (response as List).map((json) => UserStatus.fromJson(json)).toList();
+    // Map and filter views in Dart to check isViewed accurately
+    return (response as List).map((json) {
+      final views = (json['status_views'] as List?) ?? [];
+      final hasViewed = views.any((v) => v['viewer_id'] == user.id);
+
+      // Inject the computed viewed status into the JSON for the entity factory
+      final mappedJson = Map<String, dynamic>.from(json);
+      mappedJson['is_viewed_by_me'] = hasViewed;
+
+      return UserStatus.fromJson(mappedJson);
+    }).toList();
   }
 
   @override
@@ -87,27 +95,21 @@ class SupabaseStatusRepository implements StatusRepository {
     if (user == null) return;
 
     try {
-      // 1. Record specific view in status_views table
+      // Check if we already viewed this to avoid redundant calls
+      // The database trigger will handle the increment only on the FIRST view (Insert).
       await _supabase.from('status_views').upsert({
         'status_id': statusId,
         'viewer_id': user.id,
-      });
+      }, onConflict: 'status_id, viewer_id');
 
-      // 2. Increment total view_count in statuses table
-      final data = await _supabase
-          .from('statuses')
-          .select('view_count, user_id')
-          .eq('id', statusId)
-          .maybeSingle();
-
-      if (data != null && data['user_id'] != user.id) {
-        final currentCount = data['view_count'] ?? 0;
-        await _supabase
-            .from('statuses')
-            .update({'view_count': currentCount + 1}).eq('id', statusId);
-      }
+      debugPrint('Marked status $statusId as viewed by ${user.id}');
     } catch (e) {
       debugPrint('Error marking status as viewed: $e');
     }
+  }
+
+  @override
+  Stream<void> watchStatusChanges() {
+    return _supabase.from('statuses').stream(primaryKey: ['id']).map((_) {});
   }
 }

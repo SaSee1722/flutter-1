@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -24,13 +23,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:video_player/video_player.dart';
+import 'package:gossip/shared/utils/toast_utils.dart';
 import 'package:gossip/features/chat/presentation/widgets/group_settings_sheet.dart';
+import 'package:gossip/features/chat/presentation/widgets/sticker_picker_sheet.dart';
+import 'package:gossip/core/notifications/notification_sound_helper.dart';
 import 'package:gossip/core/utils/date_formatter.dart';
-import '../../../../shared/utils/toast_utils.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String roomId;
@@ -63,6 +65,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   Timer? _typingTimer;
   bool _isOtherUserOnline = false;
   int _onlineCount = 0;
+  bool _isOtherUserBlocked = false;
+  bool _isMeBlocked = false;
   String? _otherUserId;
 
   // Media & Emoji features
@@ -145,10 +149,26 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                 .listen((isOnline) {
               if (mounted) setState(() => _isOtherUserOnline = isOnline);
             });
+            // Initial block check
+            await _checkBlockStatus();
           }
         }
       } catch (_) {}
     }
+  }
+
+  Future<void> _checkBlockStatus() async {
+    if (_otherUserId == null) return;
+    try {
+      final isBlocked = await sl<ChatRepository>().isUserBlocked(_otherUserId!);
+      final amIBlocked = await sl<ChatRepository>().amIBlockedBy(_otherUserId!);
+      if (mounted) {
+        setState(() {
+          _isOtherUserBlocked = isBlocked;
+          _isMeBlocked = amIBlocked;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -195,7 +215,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     }
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     if (_messageController.text.trim().isEmpty) return;
 
     final user = Supabase.instance.client.auth.currentUser;
@@ -212,9 +232,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       senderName: 'You',
     );
 
-    context.read<ChatBloc>().add(SendMessageRequested(message));
-    _messageController.clear();
-    setState(() => _replyMessage = null); // Clear reply
+    try {
+      context.read<ChatBloc>().add(SendMessageRequested(message));
+      _messageController.clear();
+      setState(() => _replyMessage = null); // Clear reply
+    } catch (e) {
+      if (context.mounted) {
+        if (e.toString().contains('blocked')) {
+          ToastUtils.showError(context,
+              'You are blocked you cant send message !!! wait till the ${widget.chatName} unblocks you.');
+        } else {
+          ToastUtils.showError(context, 'Failed to send message: $e');
+        }
+      }
+    }
 
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
@@ -329,29 +360,37 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
         ),
         actions: [
           IconButton(
-              icon: const Icon(Icons.videocam, color: Colors.white54),
-              onPressed: () {
-                if (!widget.isGroup && _otherUserId == null) return;
-                context.read<CallBloc>().add(StartCall(
-                      receiverId: widget.isGroup ? null : _otherUserId,
-                      roomId: widget.isGroup ? widget.roomId : null,
-                      name: widget.chatName,
-                      avatar: widget.avatarUrl,
-                      isVideo: true,
-                    ));
-              }),
+              icon: Icon(Icons.videocam,
+                  color: _isMeBlocked ? Colors.white24 : Colors.white54),
+              onPressed: _isMeBlocked
+                  ? () => ToastUtils.showError(context,
+                      'You are blocked you cant make calls !!! wait till the ${widget.chatName} unblocks you.')
+                  : () {
+                      if (!widget.isGroup && _otherUserId == null) return;
+                      context.read<CallBloc>().add(StartCall(
+                            receiverId: widget.isGroup ? null : _otherUserId,
+                            roomId: widget.isGroup ? widget.roomId : null,
+                            name: widget.chatName,
+                            avatar: widget.avatarUrl,
+                            isVideo: true,
+                          ));
+                    }),
           IconButton(
-              icon: const Icon(Icons.call, color: Colors.white54),
-              onPressed: () {
-                if (!widget.isGroup && _otherUserId == null) return;
-                context.read<CallBloc>().add(StartCall(
-                      receiverId: widget.isGroup ? null : _otherUserId,
-                      roomId: widget.isGroup ? widget.roomId : null,
-                      name: widget.chatName,
-                      avatar: widget.avatarUrl,
-                      isVideo: false,
-                    ));
-              }),
+              icon: Icon(Icons.call,
+                  color: _isMeBlocked ? Colors.white24 : Colors.white54),
+              onPressed: _isMeBlocked
+                  ? () => ToastUtils.showError(context,
+                      'You are blocked you cant make calls !!! wait till the ${widget.chatName} unblocks you.')
+                  : () {
+                      if (!widget.isGroup && _otherUserId == null) return;
+                      context.read<CallBloc>().add(StartCall(
+                            receiverId: widget.isGroup ? null : _otherUserId,
+                            roomId: widget.isGroup ? widget.roomId : null,
+                            name: widget.chatName,
+                            avatar: widget.avatarUrl,
+                            isVideo: false,
+                          ));
+                    }),
           IconButton(
             icon: const Icon(Icons.more_vert, color: Colors.white54),
             onPressed: _showGossipActions,
@@ -361,54 +400,69 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       body: Column(
         children: [
           Expanded(
-            child: BlocBuilder<ChatBloc, ChatState>(
-              builder: (context, state) {
-                if (state.isLoadingMessages && state.messages.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
+            child: BlocListener<ChatBloc, ChatState>(
+              listenWhen: (previous, current) =>
+                  current.error != null && previous.error != current.error,
+              listener: (context, state) {
+                if (state.error != null) {
+                  if (state.error!.toLowerCase().contains('blocked')) {
+                    ToastUtils.showError(context,
+                        'You are blocked! cannot send message !!! wait till the ${widget.chatName} unblocks you.');
+                    _checkBlockStatus();
+                  } else {
+                    ToastUtils.showError(context, state.error!);
+                  }
                 }
-
-                final messages = state.messages;
-
-                if (state.error != null && messages.isEmpty) {
-                  return Center(
-                      child: Text(state.error!,
-                          style: const TextStyle(color: Colors.red)));
-                }
-
-                return ListView.builder(
-                  controller: _scrollController,
-                  reverse: true,
-                  padding: const EdgeInsets.all(16),
-                  itemCount:
-                      messages.length + (_typingUserName != null ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (_typingUserName != null && index == 0) {
-                      return _TypingIndicator(userName: _typingUserName!);
-                    }
-
-                    final messageIndex =
-                        _typingUserName != null ? index - 1 : index;
-                    final message = messages[messageIndex];
-                    final isMe = message.userId ==
-                        Supabase.instance.client.auth.currentUser?.id;
-                    return _MessageBubble(
-                      message: message,
-                      isMe: isMe,
-                      isGroup: widget.isGroup,
-                      onReply: (msg) {
-                        setState(() => _replyMessage = msg);
-                      },
-                      onReact: (reaction) {
-                        sl<ChatRepository>()
-                            .updateMessageReaction(message.id, reaction);
-                      },
-                    );
-                  },
-                );
               },
+              child: BlocBuilder<ChatBloc, ChatState>(
+                builder: (context, state) {
+                  if (state.isLoadingMessages && state.messages.isEmpty) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final messages = state.messages;
+
+                  if (state.error != null && messages.isEmpty) {
+                    return Center(
+                        child: Text(state.error!,
+                            style: const TextStyle(color: Colors.red)));
+                  }
+
+                  return ListView.builder(
+                    controller: _scrollController,
+                    reverse: true,
+                    padding: const EdgeInsets.all(16),
+                    itemCount:
+                        messages.length + (_typingUserName != null ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (_typingUserName != null && index == 0) {
+                        return _TypingIndicator(userName: _typingUserName!);
+                      }
+
+                      final messageIndex =
+                          _typingUserName != null ? index - 1 : index;
+                      final message = messages[messageIndex];
+                      final isMe = message.userId ==
+                          Supabase.instance.client.auth.currentUser?.id;
+                      return _MessageBubble(
+                        message: message,
+                        isMe: isMe,
+                        isGroup: widget.isGroup,
+                        onReply: (msg) {
+                          setState(() => _replyMessage = msg);
+                        },
+                        onReact: (reaction) {
+                          sl<ChatRepository>()
+                              .updateMessageReaction(message.id, reaction);
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ),
-          _buildInputArea(),
+          _buildMessageInput(),
         ],
       ),
     );
@@ -426,6 +480,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   }
 
   Future<void> _pickImage(ImageSource source) async {
+    // macOS and Windows do not support camera in image_picker
+    if (source == ImageSource.camera &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows)) {
+      if (mounted) {
+        ToastUtils.showError(context,
+            'Camera capture is only supported on Mobile devices. Please use Gallery to upload from your files.');
+      }
+      return;
+    }
+
     try {
       final XFile? image = await _imagePicker.pickImage(
         source: source,
@@ -468,16 +534,36 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 
         if (!mounted) return;
         context.read<ChatBloc>().add(SendMessageRequested(message));
+        ToastUtils.showSuccess(context, 'Image sent successfully');
       }
     } catch (e) {
-      if (kDebugMode) print('Error: $e');
+      if (mounted) {
+        final errorMsg = e.toString();
+        if (errorMsg.contains('cameraDelegate')) {
+          ToastUtils.showError(context,
+              'Unable to access camera on this platform. Please use the Gallery option.');
+        } else {
+          ToastUtils.showError(context, 'Failed to pick image: $e');
+        }
+      }
     }
   }
 
-  Future<void> _pickVideo() async {
+  Future<void> _pickVideo(ImageSource source) async {
+    // macOS and Windows do not support camera in image_picker
+    if (source == ImageSource.camera &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows)) {
+      if (mounted) {
+        ToastUtils.showError(context,
+            'Video capture is only supported on Mobile devices. Please use Gallery to upload from your files.');
+      }
+      return;
+    }
+
     try {
-      final XFile? video =
-          await _imagePicker.pickVideo(source: ImageSource.gallery);
+      final XFile? video = await _imagePicker.pickVideo(source: source);
 
       if (video != null) {
         final bytes = await video.readAsBytes();
@@ -513,9 +599,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 
         if (!mounted) return;
         context.read<ChatBloc>().add(SendMessageRequested(message));
+        ToastUtils.showSuccess(context, 'Video sent successfully');
       }
     } catch (e) {
-      if (kDebugMode) print('Error: $e');
+      if (mounted) {
+        final errorMsg = e.toString();
+        if (errorMsg.contains('cameraDelegate')) {
+          ToastUtils.showError(context,
+              'Unable to access camera on this platform. Please use the Gallery option.');
+        } else {
+          ToastUtils.showError(context, 'Failed to pick video: $e');
+        }
+      }
     }
   }
 
@@ -561,9 +656,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 
         if (!mounted) return;
         context.read<ChatBloc>().add(SendMessageRequested(message));
+        ToastUtils.showSuccess(context, 'Document sent successfully');
       }
     } catch (e) {
-      if (kDebugMode) print('Error: $e');
+      if (mounted) {
+        ToastUtils.showError(context, 'Failed to pick file: $e');
+      }
     }
   }
 
@@ -608,9 +706,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 
         if (!mounted) return;
         context.read<ChatBloc>().add(SendMessageRequested(message));
+        ToastUtils.showSuccess(context, 'Audio sent successfully');
       }
     } catch (e) {
-      if (kDebugMode) print('Error: $e');
+      if (mounted) {
+        ToastUtils.showError(context, 'Failed to pick audio: $e');
+      }
     }
   }
 
@@ -702,66 +803,66 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   void _showAttachmentOptions() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1C1C1E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      backgroundColor: GossipColors.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
       ),
       builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(vertical: 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Send Attachment',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 32,
+              runSpacing: 24,
+              alignment: WrapAlignment.center,
               children: [
+                _AttachmentOption(
+                  icon: Icons.camera_alt,
+                  label: 'Capture Image',
+                  color: Colors.blueAccent,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickImage(ImageSource.camera);
+                  },
+                ),
+                _AttachmentOption(
+                  icon: Icons.videocam,
+                  label: 'Capture Video',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickVideo(ImageSource.camera);
+                  },
+                ),
                 _AttachmentOption(
                   icon: Icons.photo_library,
                   label: 'Gallery',
-                  color: Colors.purple,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _pickImage(ImageSource.gallery);
-                  },
+                  color: Colors.purpleAccent,
+                  onTap: () => _showGallerySelection(),
                 ),
-                const SizedBox(width: 48),
-                _AttachmentOption(
-                  icon: Icons.videocam,
-                  label: 'Video',
-                  color: Colors.red,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _pickVideo();
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
                 _AttachmentOption(
                   icon: Icons.insert_drive_file,
                   label: 'Document',
-                  color: Colors.blue,
+                  color: Colors.orangeAccent,
                   onTap: () {
                     Navigator.pop(context);
                     _pickFile();
                   },
                 ),
-                const SizedBox(width: 48),
                 _AttachmentOption(
-                  icon: Icons.audiotrack,
+                  icon: Icons.audio_file,
                   label: 'Audio',
-                  color: Colors.orange,
+                  color: Colors.tealAccent,
                   onTap: () {
                     Navigator.pop(context);
                     _pickAudio();
@@ -769,14 +870,177 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildInputArea() {
+  void _openStickerPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: GossipColors.cardBackground,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.4,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) {
+          return StickerPickerSheet(
+            onStickerSelected: (url, type) {
+              Navigator.pop(context); // Close picker
+              // Send sticker message
+              final userId = Supabase.instance.client.auth.currentUser?.id;
+              if (userId == null) return;
+
+              final message = Message(
+                id: '',
+                roomId: widget.roomId,
+                userId: userId,
+                content: '',
+                status: MessageStatus.sending,
+                createdAt: DateTime.now(),
+                mediaUrl: url,
+                mediaType: 'image', // Treat stickers as images for now
+                mediaName: 'Sticker',
+                senderGender: widget.currentUserGender,
+                senderName: 'You',
+              );
+              context.read<ChatBloc>().add(SendMessageRequested(message));
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void _showGallerySelection() {
+    Navigator.pop(context);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: GossipColors.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _AttachmentOption(
+              icon: Icons.image,
+              label: 'Images',
+              color: Colors.blueAccent,
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+            _AttachmentOption(
+              icon: Icons.video_collection,
+              label: 'Videos',
+              color: Colors.redAccent,
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideo(ImageSource.gallery);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageInput() {
+    if (_isMeBlocked) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.block_flipped,
+                  color: Colors.redAccent, size: 28),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'GOSSIP RESTRICTED',
+              style: TextStyle(
+                color: Colors.redAccent.withValues(alpha: 0.5),
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'You are blocked you cant send message !!! wait till the ${widget.chatName} unblocks you.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_isOtherUserBlocked) {
+      return GestureDetector(
+        onTap: _showUserActions,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          margin: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.orangeAccent.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(24),
+            border:
+                Border.all(color: Colors.orangeAccent.withValues(alpha: 0.2)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.block, color: Colors.orangeAccent, size: 28),
+              const SizedBox(height: 12),
+              const Text(
+                'YOU BLOCKED THIS GOSSIP',
+                style: TextStyle(
+                  color: Colors.orangeAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Tap here to unblock and resume chatting.',
+                style: TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
       color: const Color(0xFF000000),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -864,6 +1128,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                         ),
                       ),
                       IconButton(
+                        icon: const Icon(Icons.star_border,
+                            color: Color(0xFFB0B0B0), size: 22),
+                        onPressed: _openStickerPicker,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
                         icon: const Icon(Icons.attach_file,
                             color: Color(0xFFB0B0B0), size: 22),
                         onPressed: _showAttachmentOptions,
@@ -932,15 +1204,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     );
   }
 
-  void _showGossipActions() {
+  Future<void> _showGossipActions() async {
     if (widget.isGroup) {
-      _showGroupInfo();
+      await _showGroupInfo();
     } else {
-      _showUserActions();
+      await _showUserActions();
     }
   }
 
   Future<void> _showGroupInfo() async {
+    final currentContext = context;
     try {
       // Fetch room data and check if current user is admin
       final userId = Supabase.instance.client.auth.currentUser?.id;
@@ -960,10 +1233,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       final bool isAdmin =
           memberData?['role'] == 'admin' || roomData['admin_id'] == userId;
 
-      if (!mounted) return;
+      if (!currentContext.mounted) return;
 
       showModalBottomSheet(
-        context: context,
+        context: currentContext,
         backgroundColor: Colors.transparent,
         isScrollControlled: true,
         builder: (context) => GroupSettingsSheet(
@@ -979,9 +1252,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     }
   }
 
-  void _showUserActions() {
-    showModalBottomSheet(
-      context: context,
+  Future<void> _showUserActions() async {
+    final currentContext = context;
+    final prefs = await SharedPreferences.getInstance();
+    final lockedChats = prefs.getStringList('locked_chats') ?? [];
+    final isLocked = lockedChats.contains(widget.roomId);
+
+    if (!currentContext.mounted) return;
+
+    await showModalBottomSheet(
+      context: currentContext,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
         padding: const EdgeInsets.all(24),
@@ -1013,38 +1293,92 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
             ),
             const SizedBox(height: 24),
             _buildActionItem(
-                icon: Icons.call, label: 'Voice Call', onTap: () {}),
+                icon: Icons.call,
+                label: 'Voice Call',
+                color: _isMeBlocked ? Colors.white24 : null,
+                onTap: _isMeBlocked
+                    ? () => ToastUtils.showError(context,
+                        'You are blocked you cant make calls !!! wait till the ${widget.chatName} unblocks you.')
+                    : () {
+                        if (!widget.isGroup && _otherUserId == null) return;
+                        context.read<CallBloc>().add(StartCall(
+                              receiverId: widget.isGroup ? null : _otherUserId,
+                              roomId: widget.isGroup ? widget.roomId : null,
+                              name: widget.chatName,
+                              avatar: widget.avatarUrl,
+                              isVideo: false,
+                            ));
+                      }),
             _buildActionItem(
-                icon: Icons.videocam, label: 'Video Call', onTap: () {}),
+                icon: Icons.videocam,
+                label: 'Video Call',
+                color: _isMeBlocked ? Colors.white24 : null,
+                onTap: _isMeBlocked
+                    ? () => ToastUtils.showError(context,
+                        'You are blocked you cant make calls !!! wait till the ${widget.chatName} unblocks you.')
+                    : () {
+                        if (!widget.isGroup && _otherUserId == null) return;
+                        context.read<CallBloc>().add(StartCall(
+                              receiverId: widget.isGroup ? null : _otherUserId,
+                              roomId: widget.isGroup ? widget.roomId : null,
+                              name: widget.chatName,
+                              avatar: widget.avatarUrl,
+                              isVideo: true,
+                            ));
+                      }),
             _buildActionItem(
-              icon: Icons.lock_outline,
-              label: 'Lock Chat',
+              icon: Icons.music_note,
+              label: 'Custom Notification',
+              color: Colors.purpleAccent,
+              onTap: () async {
+                final currentContext = context;
+                Navigator.pop(currentContext);
+                final success = await NotificationSoundHelper.setCustomSound(
+                    chatId: widget.roomId);
+                if (!currentContext.mounted) return;
+                if (success) {
+                  ToastUtils.showSuccess(
+                      currentContext, 'Custom sound set successfully!');
+                }
+              },
+            ),
+            _buildActionItem(
+              icon: isLocked ? Icons.lock_open_outlined : Icons.lock_outline,
+              label: isLocked ? 'Unlock Chat' : 'Lock Chat',
               color: GossipColors.secondary,
               onTap: _handleLockChat,
             ),
             const Divider(color: Colors.white10, height: 32),
             _buildActionItem(
-                icon: Icons.block,
-                label: 'Block User',
-                color: Colors.redAccent,
+                icon: _isOtherUserBlocked
+                    ? Icons.check_circle_outline
+                    : Icons.block,
+                label: _isOtherUserBlocked ? 'Unblock User' : 'Block User',
+                color:
+                    _isOtherUserBlocked ? Colors.greenAccent : Colors.redAccent,
                 onTap: () async {
                   if (_otherUserId == null) return;
-                  Navigator.pop(context);
+                  Navigator.pop(currentContext);
                   try {
-                    await sl<ChatRepository>().blockUser(_otherUserId!);
-                    if (!context.mounted) return;
-                    ToastUtils.showInfo(context, 'User blocked successfully.');
-                    Navigator.pop(context);
+                    if (_isOtherUserBlocked) {
+                      await sl<ChatRepository>().unblockUser(_otherUserId!);
+                      if (!currentContext.mounted) return;
+                      setState(() => _isOtherUserBlocked = false);
+                      ToastUtils.showSuccess(
+                          currentContext, 'User unblocked successfully.');
+                    } else {
+                      await sl<ChatRepository>().blockUser(_otherUserId!);
+                      if (!currentContext.mounted) return;
+                      setState(() => _isOtherUserBlocked = true);
+                      ToastUtils.showSuccess(
+                          currentContext, 'User blocked successfully.');
+                    }
                   } catch (e) {
-                    if (!context.mounted) return;
-                    ToastUtils.showError(context, 'Failed to block user: $e');
+                    if (!currentContext.mounted) return;
+                    ToastUtils.showError(
+                        currentContext, 'Operation failed: $e');
                   }
                 }),
-            _buildActionItem(
-                icon: Icons.report_gmailerrorred,
-                label: 'Report User',
-                color: Colors.redAccent,
-                onTap: () {}),
           ],
         ),
       ),
@@ -1084,16 +1418,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
   }
 
   Future<void> _handleLockChat() async {
-    Navigator.pop(context); // Close sheet
+    final currentContext = context;
+    Navigator.pop(currentContext); // Close sheet
     final prefs = await SharedPreferences.getInstance();
     final hasPin = prefs.containsKey('app_pin');
 
-    if (!mounted) return;
+    if (!currentContext.mounted) return;
 
     if (!hasPin) {
       // Set new PIN
       Navigator.push(
-        context,
+        currentContext,
         MaterialPageRoute(
           builder: (_) => PinScreen(
             isSettingUp: true,
@@ -1113,12 +1448,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 
   Future<void> _toggleChatLock(SharedPreferences prefs) async {
     final List<String> lockedChats = prefs.getStringList('locked_chats') ?? [];
+    final bool isLocked;
     if (lockedChats.contains(widget.roomId)) {
       lockedChats.remove(widget.roomId);
+      isLocked = false;
     } else {
       lockedChats.add(widget.roomId);
+      isLocked = true;
     }
     await prefs.setStringList('locked_chats', lockedChats);
+    if (mounted) {
+      ToastUtils.showSuccess(
+        context,
+        isLocked ? 'Chat locked successfully' : 'Chat unlocked successfully',
+      );
+    }
   }
 }
 
@@ -1254,6 +1598,9 @@ class _MessageBubbleState extends State<_MessageBubble> {
                                 p: TextStyle(color: textColor, fontSize: 15),
                               ),
                             ),
+                          if (widget.message.reactions != null &&
+                              widget.message.reactions!.isNotEmpty)
+                            _buildReactionsDisplay(),
                           const SizedBox(height: 4),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.end,
@@ -1286,31 +1633,79 @@ class _MessageBubbleState extends State<_MessageBubble> {
     );
   }
 
+  Widget _buildReactionsDisplay() {
+    final reactions = widget.message.reactions!;
+    final reactionCounts = <String, int>{};
+    for (var r in reactions.values) {
+      reactionCounts[r] = (reactionCounts[r] ?? 0) + 1;
+    }
+
+    // Sort by count descending
+    final sortedReactions = reactionCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    // Take top 3
+    final topReactions = sortedReactions.take(3);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 2),
+      child: Wrap(
+        spacing: 4,
+        children: topReactions.map((entry) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '${entry.key} ${entry.value > 1 ? entry.value : ""}',
+              style: const TextStyle(fontSize: 10, color: Colors.white),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildMediaContent() {
     final mediaType = widget.message.mediaType;
     final mediaUrl = widget.message.mediaUrl!;
+    final heroTag = 'media_${widget.message.id}';
 
     if (mediaType == 'image') {
       return GestureDetector(
-        onTap: () => _openUrl(mediaUrl),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CachedNetworkImage(
-                imageUrl: mediaUrl,
-                placeholder: (context, url) => Container(
-                  height: 200,
-                  width: double.infinity,
-                  color: Colors.white10,
-                  child: const Center(
-                      child: CircularProgressIndicator(strokeWidth: 2)),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => _FullScreenMediaViewer(
+              url: mediaUrl,
+              type: 'image',
+              heroTag: heroTag,
+            ),
+          ),
+        ),
+        child: Hero(
+          tag: heroTag,
+          child: Container(
+            width: 200,
+            height: 200,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white10),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: CachedNetworkImage(
+              imageUrl: mediaUrl,
+              fit: BoxFit.cover,
+              placeholder: (context, url) => Container(
+                color: Colors.white.withValues(alpha: 0.05),
+                child: const Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-                errorWidget: (context, url, error) => const Icon(Icons.error),
-                fit: BoxFit.cover,
               ),
-            ],
+              errorWidget: (context, url, error) => const Icon(Icons.error),
+            ),
           ),
         ),
       );
@@ -1318,26 +1713,43 @@ class _MessageBubbleState extends State<_MessageBubble> {
 
     if (mediaType == 'video') {
       return GestureDetector(
-        onTap: () => _openUrl(mediaUrl),
-        child: Container(
-          height: 200,
-          decoration: BoxDecoration(
-            color: Colors.black26,
-            borderRadius: BorderRadius.circular(12),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => _FullScreenMediaViewer(
+              url: mediaUrl,
+              type: 'video',
+              heroTag: heroTag,
+            ),
           ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              const Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
-              Positioned(
-                bottom: 8,
-                right: 8,
-                child: Text(
-                  widget.message.mediaName ?? 'Video',
-                  style: const TextStyle(color: Colors.white, fontSize: 10),
+        ),
+        child: Hero(
+          tag: heroTag,
+          child: Container(
+            width: 200,
+            height: 200,
+            decoration: BoxDecoration(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white10),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // We show the actual video as a preview if possible
+                _VideoPreviewPlayer(url: mediaUrl),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Colors.black26,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.play_arrow,
+                      color: Colors.white, size: 32),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -1409,28 +1821,103 @@ class _MessageBubbleState extends State<_MessageBubble> {
             borderRadius: BorderRadius.circular(32),
             border: Border.all(color: Colors.white24),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: ['❤️', '😂', '😮', '😢', '🔥', '👍']
-                .map((e) => GestureDetector(
-                      onTap: () {
-                        widget.onReact(e);
-                        Navigator.pop(context);
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(e, style: const TextStyle(fontSize: 28))
-                            .animate()
-                            .scale(
-                                duration: 200.ms,
-                                begin: const Offset(0.8, 0.8)),
-                      ),
-                    ))
-                .toList(),
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 16,
+            children: [
+              ...[
+                '❤️',
+                '😂',
+                '😮',
+                '😢',
+                '🔥',
+                '👍'
+              ].map((e) => GestureDetector(
+                    onTap: () {
+                      widget.onReact(e);
+                      Navigator.pop(context);
+                    },
+                    child: Text(e, style: const TextStyle(fontSize: 28))
+                        .animate()
+                        .scale(duration: 200.ms, begin: const Offset(0.8, 0.8)),
+                  )),
+              GestureDetector(
+                onTap: () {
+                  Navigator.pop(context);
+                  _openEmojiReactionPicker();
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.add, color: Colors.white, size: 24),
+                ),
+              ),
+            ],
           ),
         ),
       ),
+    );
+  }
+
+  void _openEmojiReactionPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: GossipColors.cardBackground,
+      isScrollControlled: true,
+      builder: (context) {
+        return SizedBox(
+          height: MediaQuery.of(context).size.height * 0.5,
+          child: Column(
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(
+                child: EmojiPicker(
+                  onEmojiSelected: (category, emoji) {
+                    widget.onReact(emoji.emoji);
+                    Navigator.pop(context);
+                  },
+                  config: Config(
+                    height: 256,
+                    checkPlatformCompatibility: true,
+                    emojiViewConfig: EmojiViewConfig(
+                      backgroundColor: GossipColors.cardBackground,
+                      columns: 7,
+                      emojiSizeMax: 28,
+                    ),
+                    categoryViewConfig: const CategoryViewConfig(
+                      backgroundColor: GossipColors.cardBackground,
+                      indicatorColor: GossipColors.primary,
+                      iconColor: Colors.grey,
+                      iconColorSelected: GossipColors.primary,
+                    ),
+                    bottomActionBarConfig: const BottomActionBarConfig(
+                      backgroundColor: GossipColors.cardBackground,
+                      buttonColor: GossipColors.cardBackground,
+                      buttonIconColor: Colors.grey,
+                    ),
+                    searchViewConfig: const SearchViewConfig(
+                      backgroundColor: GossipColors.cardBackground,
+                      buttonIconColor: Colors.grey,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -1748,7 +2235,6 @@ class _AttachmentOption extends StatelessWidget {
     required this.color,
     required this.onTap,
   });
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -1774,6 +2260,172 @@ class _AttachmentOption extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FullScreenMediaViewer extends StatefulWidget {
+  final String url;
+  final String type;
+  final String heroTag;
+
+  const _FullScreenMediaViewer({
+    required this.url,
+    required this.type,
+    required this.heroTag,
+  });
+
+  @override
+  State<_FullScreenMediaViewer> createState() => _FullScreenMediaViewerState();
+}
+
+class _FullScreenMediaViewerState extends State<_FullScreenMediaViewer> {
+  VideoPlayerController? _videoController;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.type == 'video') {
+      _videoController = VideoPlayerController.networkUrl(Uri.parse(widget.url))
+        ..initialize().then((_) {
+          if (mounted) {
+            setState(() {
+              _isInitialized = true;
+            });
+            _videoController?.play();
+            _videoController?.setLooping(true);
+          }
+        });
+    }
+  }
+
+  @override
+  void dispose() {
+    _videoController?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.download, color: Colors.white),
+            onPressed: () async {
+              final uri = Uri.parse(widget.url);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+          ),
+        ],
+      ),
+      body: Center(
+        child: Hero(
+          tag: widget.heroTag,
+          child: widget.type == 'image'
+              ? InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: CachedNetworkImage(
+                    imageUrl: widget.url,
+                    fit: BoxFit.contain,
+                    width: double.infinity,
+                    height: double.infinity,
+                  ),
+                )
+              : _isInitialized
+                  ? AspectRatio(
+                      aspectRatio: _videoController!.value.aspectRatio,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          VideoPlayer(_videoController!),
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _videoController!.value.isPlaying
+                                    ? _videoController!.pause()
+                                    : _videoController!.play();
+                              });
+                            },
+                            child: Icon(
+                              _videoController!.value.isPlaying
+                                  ? Icons.pause_circle_outline
+                                  : Icons.play_circle_outline,
+                              color: Colors.white.withValues(alpha: 0.5),
+                              size: 80,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : const CircularProgressIndicator(color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoPreviewPlayer extends StatefulWidget {
+  final String url;
+  const _VideoPreviewPlayer({required this.url});
+
+  @override
+  State<_VideoPreviewPlayer> createState() => _VideoPreviewPlayerState();
+}
+
+class _VideoPreviewPlayerState extends State<_VideoPreviewPlayer> {
+  VideoPlayerController? _controller;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.url))
+      ..initialize().then((_) {
+        if (mounted) {
+          setState(() {
+            _isInitialized = true;
+          });
+          _controller?.setVolume(0);
+          _controller?.setLooping(true);
+          _controller?.play();
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isInitialized) {
+      return Container(color: Colors.white.withValues(alpha: 0.05));
+    }
+    return SizedBox.expand(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        clipBehavior: Clip.hardEdge,
+        child: SizedBox(
+          width: _controller!.value.size.width,
+          height: _controller!.value.size.height,
+          child: VideoPlayer(_controller!),
+        ),
       ),
     );
   }

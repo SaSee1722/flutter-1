@@ -50,11 +50,12 @@ class SupabaseAuthRepository implements AuthRepository {
     String? phone,
     String? gender,
     String? bio,
+    bool? isPublic,
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
 
-    final updates = {
+    final Map<String, dynamic> updates = {
       'updated_at': DateTime.now().toIso8601String(),
     };
 
@@ -64,6 +65,7 @@ class SupabaseAuthRepository implements AuthRepository {
     if (phone != null) updates['phone'] = phone;
     if (gender != null) updates['gender'] = gender;
     if (bio != null) updates['bio'] = bio;
+    if (isPublic != null) updates['is_public'] = isPublic;
 
     await _supabase
         .from(SupabaseConstants.profilesTable)

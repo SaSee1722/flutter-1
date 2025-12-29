@@ -8,6 +8,7 @@ class UserProfile {
   final String? phone;
   final String? gender;
   final String? bio;
+  final bool isPublic;
 
   UserProfile({
     required this.id,
@@ -19,6 +20,7 @@ class UserProfile {
     this.phone,
     this.gender,
     this.bio,
+    this.isPublic = true,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -32,6 +34,7 @@ class UserProfile {
       phone: json['phone'],
       gender: json['gender'],
       bio: json['bio'],
+      isPublic: json['is_public'] ?? true,
     );
   }
 }

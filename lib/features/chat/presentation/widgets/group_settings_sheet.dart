@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/theme/gossip_colors.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:gossip/core/notifications/notification_sound_helper.dart';
 import '../../../../shared/utils/toast_utils.dart';
 
 class GroupSettingsSheet extends StatefulWidget {
@@ -228,6 +229,34 @@ class _GroupSettingsSheetState extends State<GroupSettingsSheet> {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          InkWell(
+            onTap: _setCustomNotification,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.music_note, color: Colors.purpleAccent, size: 20),
+                  SizedBox(width: 12),
+                  Text(
+                    'Custom Notification',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Spacer(),
+                  Icon(Icons.chevron_right, color: GossipColors.textDim),
+                ],
+              ),
+            ),
+          ),
           if (widget.isAdmin) ...[
             const Spacer(),
             SizedBox(
@@ -294,6 +323,22 @@ class _GroupSettingsSheetState extends State<GroupSettingsSheet> {
       if (mounted) {
         ToastUtils.showError(context, 'Error: $e');
       }
+    }
+  }
+
+  Future<void> _setCustomNotification() async {
+    // We do NOT pop the context here, we keep the sheet open or maybe better?
+    // Actually typically we might want to pop since file picker takes over.
+    // But let's keep it consistent with chat detail.
+    // Since this is a sheet, file picker will open on top.
+    final currentContext = context;
+    final success =
+        await NotificationSoundHelper.setCustomSound(chatId: widget.roomId);
+
+    if (!currentContext.mounted) return;
+
+    if (success) {
+      ToastUtils.showSuccess(currentContext, 'Custom sound set successfully!');
     }
   }
 

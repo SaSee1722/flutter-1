@@ -6,4 +6,5 @@ abstract class StatusRepository {
   Future<List<UserStatus>> getActiveStatuses();
   Future<void> deleteStatus(String statusId);
   Future<void> markStatusViewed(String statusId);
+  Stream<void> watchStatusChanges();
 }

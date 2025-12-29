@@ -22,6 +22,8 @@ abstract class ChatRepository {
   // Privacy & Account
   Future<void> blockUser(String userId);
   Future<void> unblockUser(String userId);
+  Future<bool> isUserBlocked(String userId);
+  Future<bool> amIBlockedBy(String userId);
   Future<List<Map<String, dynamic>>> getBlockedUsers();
   Future<void> deleteAccount();
 

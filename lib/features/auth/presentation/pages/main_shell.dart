@@ -62,7 +62,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       backgroundColor: GossipColors.background,
       body: Stack(
         children: [
-          _pages[_selectedIndex],
+          IndexedStack(
+            index: _selectedIndex,
+            children: _pages,
+          ),
           Positioned(
             left: 0,
             right: 0,

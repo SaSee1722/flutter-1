@@ -93,14 +93,25 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         if (event.avatarFile != null) {
           await _authRepository.updateAvatar(event.avatarFile!);
         }
-        await _authRepository.updateProfile(
-          fullName: event.fullName,
-          username: event.username,
-          age: event.age,
-          phone: event.phone,
-          gender: event.gender,
-          bio: event.bio,
-        );
+
+        // Only update profile if there are actual profile changes
+        if (event.fullName != null ||
+            event.username != null ||
+            event.age != null ||
+            event.phone != null ||
+            event.gender != null ||
+            event.bio != null ||
+            event.isPublic != null) {
+          await _authRepository.updateProfile(
+            fullName: event.fullName,
+            username: event.username,
+            age: event.age,
+            phone: event.phone,
+            gender: event.gender,
+            bio: event.bio,
+            isPublic: event.isPublic,
+          );
+        }
         emit(AuthAuthenticated(_authRepository.currentUser!));
       } catch (e) {
         emit(AuthFailure(e.toString()));

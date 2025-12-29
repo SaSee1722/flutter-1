@@ -9,6 +9,8 @@ import 'package:gossip/features/vibes/presentation/bloc/vibe_state.dart';
 import 'package:gossip/features/vibes/presentation/pages/vibe_preview_screen.dart';
 import 'package:gossip/features/vibes/presentation/pages/vibe_view_screen.dart';
 import 'package:gossip/shared/widgets/gradient_text.dart';
+import 'package:gossip/shared/utils/toast_utils.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -23,6 +25,18 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
   final ImagePicker _picker = ImagePicker();
 
   Future<void> _pickImage(ImageSource source) async {
+    // macOS and Windows do not support camera in image_picker
+    if (source == ImageSource.camera &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows)) {
+      if (mounted) {
+        ToastUtils.showError(context,
+            'Camera capture is only supported on Mobile devices. Please use Gallery to upload from your files.');
+      }
+      return;
+    }
+
     try {
       final XFile? image = await _picker.pickImage(
         source: source,
@@ -40,14 +54,30 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        final errorMsg = e.toString();
+        if (errorMsg.contains('cameraDelegate')) {
+          ToastUtils.showError(context,
+              'Unable to access camera on this platform. Please use the Gallery option.');
+        } else {
+          ToastUtils.showError(context, 'Failed to pick image: $e');
+        }
       }
     }
   }
 
   Future<void> _pickVideo(ImageSource source) async {
+    // macOS and Windows do not support camera in image_picker
+    if (source == ImageSource.camera &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows)) {
+      if (mounted) {
+        ToastUtils.showError(context,
+            'Video capture is only supported on Mobile devices. Please use Gallery to upload from your files.');
+      }
+      return;
+    }
+
     try {
       final XFile? video = await _picker.pickVideo(
         source: source,
@@ -63,9 +93,13 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        final errorMsg = e.toString();
+        if (errorMsg.contains('cameraDelegate')) {
+          ToastUtils.showError(context,
+              'Unable to access camera on this platform. Please use the Gallery option.');
+        } else {
+          ToastUtils.showError(context, 'Failed to pick video: $e');
+        }
       }
     }
   }
@@ -74,42 +108,78 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: GossipColors.cardBackground,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
       ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
             ListTile(
-              leading: const Icon(Icons.image, color: Colors.white),
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.camera_alt,
+                    color: Colors.blueAccent, size: 20),
+              ),
               title: const Text('Capture Image',
-                  style: TextStyle(color: Colors.white)),
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
               onTap: () {
                 Navigator.pop(context);
                 _pickImage(ImageSource.camera);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.videocam, color: Colors.white),
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.videocam,
+                    color: Colors.redAccent, size: 20),
+              ),
               title: const Text('Capture Video (Max 30s)',
-                  style: TextStyle(color: Colors.white)),
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
               onTap: () {
                 Navigator.pop(context);
                 _pickVideo(ImageSource.camera);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.white),
-              title:
-                  const Text('Gallery', style: TextStyle(color: Colors.white)),
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: GossipColors.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.photo_library,
+                    color: GossipColors.primary, size: 20),
+              ),
+              title: const Text('Gallery',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
               onTap: () {
                 Navigator.pop(context);
-                // We'll let the user choose image or video from gallery by showing another small choice or just picking image for simplicity
-                // Actually image_picker pickImage vs pickVideo are distinct.
                 _showGalleryOptions();
               },
             ),
+            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -120,26 +190,68 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: GossipColors.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+      ),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.image, color: Colors.white),
-              title: const Text('Image', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.gallery);
-              },
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildGalleryOption(
+                  icon: Icons.image,
+                  label: 'Image',
+                  color: Colors.blueAccent,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickImage(ImageSource.gallery);
+                  },
+                ),
+                _buildGalleryOption(
+                  icon: Icons.videocam,
+                  label: 'Video',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _pickVideo(ImageSource.gallery);
+                  },
+                ),
+              ],
             ),
-            ListTile(
-              leading: const Icon(Icons.videocam, color: Colors.white),
-              title: const Text('Video', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _pickVideo(ImageSource.gallery);
-              },
-            ),
+            const SizedBox(height: 32),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGalleryOption({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 100,
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 8),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -158,9 +270,7 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
               child: BlocConsumer<VibeBloc, VibeState>(
                 listener: (context, state) {
                   if (state is VibeError) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error: ${state.message}')),
-                    );
+                    ToastUtils.showError(context, state.message);
                   }
                 },
                 builder: (context, state) {

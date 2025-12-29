@@ -44,6 +44,7 @@ class AuthProfileUpdateRequested extends AuthEvent {
   final String? phone;
   final String? gender;
   final String? bio;
+  final bool? isPublic;
   final XFile? avatarFile;
 
   AuthProfileUpdateRequested({
@@ -53,10 +54,11 @@ class AuthProfileUpdateRequested extends AuthEvent {
     this.phone,
     this.gender,
     this.bio,
+    this.isPublic,
     this.avatarFile,
   });
 
   @override
   List<Object?> get props =>
-      [fullName, username, age, phone, gender, bio, avatarFile];
+      [fullName, username, age, phone, gender, bio, isPublic, avatarFile];
 }

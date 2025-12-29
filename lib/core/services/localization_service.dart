@@ -21,9 +21,10 @@ class LocalizationService {
       'blocked_users': 'Blocked Users',
       'share_profile': 'Share Profile',
       'select_language': 'SELECT LANGUAGE.',
+      'public_visibility': 'Public Visibility',
     },
     'Hindi (हिन्दी)': {
-      'welcome_back': 'वापसी पर स्वागत है',
+      'welcome_back': 'वापசி पर स्वागत है',
       'personal_info': 'व्यक्तिगत जानकारी',
       'settings': 'सेटिंग्स',
       'edit': 'संपादन करें',
@@ -43,6 +44,7 @@ class LocalizationService {
       'blocked_users': 'अवरुद्ध उपयोगकर्ता',
       'share_profile': 'प्रोफ़ाइल साझा करें',
       'select_language': 'भाषा चुनें',
+      'public_visibility': 'सार्वजनिक दृश्यता',
     },
     'Tamil (தமிழ்)': {
       'welcome_back': 'நல்வரவு',
@@ -65,6 +67,7 @@ class LocalizationService {
       'blocked_users': 'தடைசெய்யப்பட்ட பயனர்கள்',
       'share_profile': 'சுயவிவரத்தைப் பகிரவும்',
       'select_language': 'மொழியைத் தேர்ந்தெடுக்கவும்',
+      'public_visibility': 'பொதுத் தெரிவுநிலை',
     },
   };
 

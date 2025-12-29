@@ -29,7 +29,10 @@ class _CallsScreenState extends State<CallsScreen> {
   void initState() {
     super.initState();
     _currentUserId = sl<ChatRepository>().currentUser!.id;
-    _setupRealtimeListener();
+    // Stagger calls listener to avoid contending with chat list load
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) _setupRealtimeListener();
+    });
   }
 
   void _setupRealtimeListener() {

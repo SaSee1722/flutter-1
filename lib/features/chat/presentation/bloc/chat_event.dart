@@ -40,3 +40,13 @@ class MessagesUpdated extends ChatEvent {
   @override
   List<Object?> get props => [messages];
 }
+
+class UpdateReactionRequest extends ChatEvent {
+  final String messageId;
+  final String? reaction; // null to remove
+
+  UpdateReactionRequest({required this.messageId, this.reaction});
+
+  @override
+  List<Object?> get props => [messageId, reaction];
+}

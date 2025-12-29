@@ -584,6 +584,7 @@ class SupabaseChatRepository implements ChatRepository {
         .from('profiles')
         .select('id, username, avatar_url')
         .ilike('username', '%$query%')
+        .eq('is_public', true)
         .neq('id', user?.id ?? '')
         .limit(20);
 
@@ -721,10 +722,40 @@ class SupabaseChatRepository implements ChatRepository {
   Future<void> blockUser(String userId) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-    await _supabase.from('blocked_users').insert({
+    await _supabase.from('blocked_users').upsert({
       'blocker_id': user.id,
       'blocked_id': userId,
-    });
+    }, onConflict: 'blocker_id, blocked_id');
+  }
+
+  @override
+  Future<bool> isUserBlocked(String userId) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return false;
+
+    final response = await _supabase
+        .from('blocked_users')
+        .select()
+        .eq('blocker_id', user.id)
+        .eq('blocked_id', userId)
+        .maybeSingle();
+
+    return response != null;
+  }
+
+  @override
+  Future<bool> amIBlockedBy(String userId) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return false;
+
+    final response = await _supabase
+        .from('blocked_users')
+        .select()
+        .eq('blocker_id', userId)
+        .eq('blocked_id', user.id)
+        .maybeSingle();
+
+    return response != null;
   }
 
   @override

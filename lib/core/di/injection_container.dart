@@ -18,6 +18,7 @@ import '../../features/call/data/webrtc_service.dart';
 import '../../features/call/presentation/bloc/call_bloc.dart';
 import '../notifications/notification_service.dart';
 import '../services/deep_link_service.dart';
+import '../services/call_sound_service.dart';
 
 final sl = GetIt.instance;
 
@@ -43,9 +44,13 @@ Future<void> init() async {
   sl.registerLazySingleton<StatusRepository>(
       () => SupabaseStatusRepository(sl()));
   sl.registerLazySingleton<CallRepository>(() => SupabaseCallRepository(sl()));
+
+  // Services
   sl.registerLazySingleton<WebRTCService>(() => WebRTCService(sl()));
   sl.registerLazySingleton<NotificationService>(() => NotificationService());
   sl.registerLazySingleton<DeepLinkService>(() => DeepLinkService());
+  sl.registerLazySingleton<CallSoundService>(
+      () => CallSoundService()); // Added CallSoundService
 
   // Blocs
   sl.registerFactory(() => AuthBloc(sl()));
@@ -55,5 +60,6 @@ Future<void> init() async {
         webRTCService: sl(),
         callRepository: sl(),
         chatRepository: sl(),
+        soundService: sl(),
       ));
 }
