@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
@@ -23,7 +24,12 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final XFile? image = await _picker.pickImage(source: source);
+      final XFile? image = await _picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 80,
+      );
       if (image != null && mounted) {
         Navigator.push(
           context,
@@ -193,7 +199,7 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           image: DecorationImage(
-            image: NetworkImage(vibe.mediaUrl), // Optimized logic
+            image: CachedNetworkImageProvider(vibe.mediaUrl), // Optimized logic
             fit: BoxFit.cover,
           ),
           boxShadow: [
@@ -229,7 +235,7 @@ class _CreateVibeScreenState extends State<CreateVibeScreen> {
                     radius: 10,
                     backgroundColor: GossipColors.primary,
                     backgroundImage: vibe.mediaUrl.isNotEmpty
-                        ? NetworkImage(vibe.mediaUrl)
+                        ? CachedNetworkImageProvider(vibe.mediaUrl)
                         : null,
                   ),
                   const SizedBox(height: 4),

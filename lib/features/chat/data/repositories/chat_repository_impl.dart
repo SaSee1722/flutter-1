@@ -103,7 +103,49 @@ class SupabaseChatRepository implements ChatRepository {
             : item['sender_id'] as String;
       }).toList();
 
-      // Bulk fetch profiles
+      final roomIds = friendsData.map((item) => item['id'] as String).toList();
+
+      // Groups
+      List<dynamic> groupsData = [];
+      try {
+        final groupMemberships = await _supabase
+            .from('group_members')
+            .select('room_id')
+            .eq('user_id', user.id);
+
+        final groupRoomIds = (groupMemberships as List)
+            .map((m) => m['room_id'] as String)
+            .toList();
+
+        if (groupRoomIds.isNotEmpty) {
+          groupsData = await _supabase
+              .from('chat_rooms')
+              .select()
+              .inFilter('id', groupRoomIds);
+          roomIds.addAll(groupRoomIds);
+        }
+      } catch (_) {}
+
+      if (roomIds.isEmpty) {
+        if (!controller.isClosed) controller.add([]);
+        return;
+      }
+
+      // 1. BATCH FETCH UNREAD COUNTS
+      final unreadMessages = await _supabase
+          .from('messages')
+          .select('room_id')
+          .inFilter('room_id', roomIds)
+          .neq('user_id', user.id)
+          .inFilter('status', ['sent', 'delivered']);
+
+      final Map<String, int> unreadCountsMap = {};
+      for (var msg in (unreadMessages as List)) {
+        final rId = msg['room_id'] as String;
+        unreadCountsMap[rId] = (unreadCountsMap[rId] ?? 0) + 1;
+      }
+
+      // 2. BULK FETCH PROFILES
       Map<String, dynamic> profilesMap = {};
       if (friendIds.isNotEmpty) {
         final profilesData = await _supabase
@@ -115,31 +157,20 @@ class SupabaseChatRepository implements ChatRepository {
         }
       }
 
-      // Parallel fetch last messages and unread counts
-      final futures = friendsData.map((item) async {
+      // 3. PARALLEL FETCH LAST MESSAGES
+      final friendFutures = friendsData.map((item) async {
         final friendId = item['sender_id'] == user.id
             ? item['receiver_id']
             : item['sender_id'];
         final profile = profilesMap[friendId];
 
-        final results = await Future.wait<dynamic>([
-          _supabase
-              .from('messages')
-              .select('id, content, created_at, status, user_id')
-              .eq('room_id', item['id'])
-              .order('created_at', ascending: false)
-              .limit(1)
-              .maybeSingle(),
-          _supabase
-              .from('messages')
-              .select('id')
-              .eq('room_id', item['id'])
-              .neq('user_id', user.id)
-              .inFilter('status', ['sent', 'delivered'])
-        ]);
-
-        final lastMsgData = results[0] as Map<String, dynamic>?;
-        final unreadCount = (results[1] as List).length;
+        final lastMsgData = await _supabase
+            .from('messages')
+            .select('id, content, created_at, status, user_id')
+            .eq('room_id', item['id'])
+            .order('created_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
 
         return ChatRoom(
           id: item['id'],
@@ -148,7 +179,7 @@ class SupabaseChatRepository implements ChatRepository {
           gender: profile?['gender'],
           lastMessage: lastMsgData?['content'] ?? 'Tap to gossip',
           time: null,
-          unreadCount: unreadCount,
+          unreadCount: unreadCountsMap[item['id']] ?? 0,
           isGroup: false,
           lastMessageTime: lastMsgData != null
               ? DateTime.parse(lastMsgData['created_at'])
@@ -157,61 +188,31 @@ class SupabaseChatRepository implements ChatRepository {
         );
       });
 
-      rooms.addAll(await Future.wait(futures));
+      final groupFutures = groupsData.map((group) async {
+        final lastMsgData = await _supabase
+            .from('messages')
+            .select('id, content, created_at, status, user_id')
+            .eq('room_id', group['id'])
+            .order('created_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
 
-      // Groups
-      try {
-        final groupMemberships = await _supabase
-            .from('group_members')
-            .select('room_id')
-            .eq('user_id', user.id);
+        return ChatRoom(
+          id: group['id'],
+          name: group['name'] ?? 'Unnamed Group',
+          avatarUrl: group['avatar_url'],
+          lastMessage: lastMsgData?['content'] ?? 'No messages yet',
+          time: null,
+          unreadCount: unreadCountsMap[group['id']] ?? 0,
+          isGroup: true,
+          lastMessageTime: lastMsgData != null
+              ? DateTime.parse(lastMsgData['created_at'])
+              : DateTime.parse(group['created_at']),
+          otherUserId: null,
+        );
+      });
 
-        final roomIds = (groupMemberships as List)
-            .map((m) => m['room_id'] as String)
-            .toList();
-
-        if (roomIds.isNotEmpty) {
-          final groupsData = await _supabase
-              .from('chat_rooms')
-              .select()
-              .inFilter('id', roomIds);
-
-          for (var group in groupsData) {
-            final results = await Future.wait<dynamic>([
-              _supabase
-                  .from('messages')
-                  .select('id, content, created_at, status, user_id')
-                  .eq('room_id', group['id'])
-                  .order('created_at', ascending: false)
-                  .limit(1)
-                  .maybeSingle(),
-              _supabase
-                  .from('messages')
-                  .select('id')
-                  .eq('room_id', group['id'])
-                  .neq('user_id', user.id)
-                  .inFilter('status', ['sent', 'delivered'])
-            ]);
-
-            final lastMsgData = results[0] as Map<String, dynamic>?;
-            final unreadCount = (results[1] as List).length;
-
-            rooms.add(ChatRoom(
-              id: group['id'],
-              name: group['name'] ?? 'Unnamed Group',
-              avatarUrl: group['avatar_url'],
-              lastMessage: lastMsgData?['content'] ?? 'No messages yet',
-              time: null,
-              unreadCount: unreadCount,
-              isGroup: true,
-              lastMessageTime: lastMsgData != null
-                  ? DateTime.parse(lastMsgData['created_at'])
-                  : DateTime.parse(group['created_at']),
-              otherUserId: null,
-            ));
-          }
-        }
-      } catch (_) {}
+      rooms.addAll(await Future.wait([...friendFutures, ...groupFutures]));
 
       rooms.sort((a, b) {
         final timeA = a.lastMessageTime ?? DateTime(2000);
@@ -577,7 +578,7 @@ class SupabaseChatRepository implements ChatRepository {
     if (query.isEmpty) return [];
 
     final user = _supabase.auth.currentUser;
-    // Search for users, but filter out current user and existing friends
+    // Search for users, but filter out current user
     final response = await _supabase
         .from('profiles')
         .select('id, username, avatar_url')
@@ -585,7 +586,35 @@ class SupabaseChatRepository implements ChatRepository {
         .neq('id', user?.id ?? '')
         .limit(20);
 
-    return List<Map<String, dynamic>>.from(response);
+    final results = List<Map<String, dynamic>>.from(response);
+
+    if (user != null && results.isNotEmpty) {
+      // Get all friend requests involving the current user and these search results
+      final userIds = results.map((u) => u['id']).toList();
+      final requests = await _supabase
+          .from('friend_requests')
+          .select()
+          .or('sender_id.eq.${user.id},receiver_id.eq.${user.id}')
+          .inFilter('sender_id', userIds.followedBy([user.id]).toList())
+          .inFilter('receiver_id', userIds.followedBy([user.id]).toList());
+
+      for (var result in results) {
+        final request = (requests as List).firstWhere(
+          (r) =>
+              (r['sender_id'] == user.id && r['receiver_id'] == result['id']) ||
+              (r['receiver_id'] == user.id && r['sender_id'] == result['id']),
+          orElse: () => null,
+        );
+
+        if (request != null) {
+          result['friendship_status'] = request['status'];
+        } else {
+          result['friendship_status'] = 'none';
+        }
+      }
+    }
+
+    return results;
   }
 
   @override

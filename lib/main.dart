@@ -16,6 +16,7 @@ import 'core/notifications/notification_service.dart';
 import 'features/call/presentation/widgets/call_overlay.dart';
 import 'features/chat/presentation/pages/chat_detail_screen.dart';
 import 'features/call/presentation/pages/incoming_call_screen.dart';
+import 'core/services/deep_link_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,6 +27,9 @@ void main() async {
   );
 
   await di.init();
+
+  // Initialize Deep Linking
+  di.sl<DeepLinkService>().initialize();
 
   // Initialize Firebase & Notifications (Mobile Only)
   if (Platform.isAndroid || Platform.isIOS) {

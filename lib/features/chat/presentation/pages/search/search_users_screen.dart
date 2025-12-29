@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
 import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
 import 'package:gossip/core/di/injection_container.dart';
@@ -133,8 +134,13 @@ class _SearchUsersScreenState extends State<SearchUsersScreen> {
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16)),
                           leading: CircleAvatar(
-                            backgroundImage: NetworkImage(user['avatar_url'] ??
-                                'https://picsum.photos/seed/${user['username']}/100'),
+                            backgroundColor:
+                                GossipColors.primary.withValues(alpha: 0.1),
+                            backgroundImage: user['avatar_url'] != null
+                                ? CachedNetworkImageProvider(user['avatar_url'])
+                                : NetworkImage(
+                                        'https://picsum.photos/seed/${user['username']}/100')
+                                    as ImageProvider,
                           ),
                           title: Text(
                             user['username'] ?? 'Unknown',
@@ -142,11 +148,7 @@ class _SearchUsersScreenState extends State<SearchUsersScreen> {
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold),
                           ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.person_add,
-                                color: GossipColors.primary),
-                            onPressed: () => _sendFriendRequest(user['id']),
-                          ),
+                          trailing: _buildTrailing(user),
                         );
                       },
                     ),
@@ -154,6 +156,36 @@ class _SearchUsersScreenState extends State<SearchUsersScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildTrailing(Map<String, dynamic> user) {
+    final status = user['friendship_status'];
+
+    if (status == 'accepted') {
+      return const Text(
+        'Friend',
+        style: TextStyle(
+          color: GossipColors.primary,
+          fontWeight: FontWeight.bold,
+          fontSize: 12,
+        ),
+      );
+    }
+
+    if (status == 'pending') {
+      return const Text(
+        'Pending',
+        style: TextStyle(
+          color: GossipColors.textDim,
+          fontSize: 12,
+        ),
+      );
+    }
+
+    return IconButton(
+      icon: const Icon(Icons.person_add, color: GossipColors.primary),
+      onPressed: () => _sendFriendRequest(user['id']),
     );
   }
 }

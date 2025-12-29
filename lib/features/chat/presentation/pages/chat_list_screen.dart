@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
 import 'package:gossip/features/chat/domain/entities/chat_room.dart';
@@ -557,7 +558,7 @@ class _NotificationSheetState extends State<_NotificationSheet> {
                             radius: 20,
                             backgroundColor: Colors.white12,
                             backgroundImage: req.senderAvatar != null
-                                ? NetworkImage(req.senderAvatar!)
+                                ? CachedNetworkImageProvider(req.senderAvatar!)
                                 : null,
                             child: req.senderAvatar == null
                                 ? Text(req.senderName[0].toUpperCase())
@@ -671,7 +672,7 @@ class _VibeItem extends StatelessWidget {
                       ),
                       image: imageUrl != null
                           ? DecorationImage(
-                              image: NetworkImage(imageUrl!),
+                              image: CachedNetworkImageProvider(imageUrl!),
                               fit: BoxFit.cover,
                             )
                           : null,
@@ -760,8 +761,9 @@ class _ChatListItem extends StatelessWidget {
             CircleAvatar(
               radius: 24,
               backgroundColor: GossipColors.primary.withValues(alpha: 0.1),
-              backgroundImage:
-                  room.avatarUrl != null ? NetworkImage(room.avatarUrl!) : null,
+              backgroundImage: room.avatarUrl != null
+                  ? CachedNetworkImageProvider(room.avatarUrl!)
+                  : null,
               child: room.avatarUrl == null
                   ? Text(room.name[0].toUpperCase(),
                       style: const TextStyle(

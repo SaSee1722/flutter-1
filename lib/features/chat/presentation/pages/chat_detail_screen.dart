@@ -247,7 +247,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                       backgroundColor:
                           GossipColors.primary.withValues(alpha: 0.2),
                       backgroundImage: widget.avatarUrl != null
-                          ? NetworkImage(widget.avatarUrl!)
+                          ? CachedNetworkImageProvider(widget.avatarUrl!)
                           : null,
                       child: widget.avatarUrl == null
                           ? Text(widget.chatName[0].toUpperCase(),

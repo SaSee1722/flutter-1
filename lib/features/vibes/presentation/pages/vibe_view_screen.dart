@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
 import 'package:gossip/features/vibes/domain/entities/user_status.dart';
@@ -35,7 +36,7 @@ class _VibeViewScreenState extends State<VibeViewScreen>
     // 30s for video, 10s for image
     final duration = _currentVibe.isVideo
         ? const Duration(seconds: 30)
-        : const Duration(seconds: 10);
+        : const Duration(seconds: 15);
 
     // Initialize controller if not already done, or reset it
     _progressController = AnimationController(
@@ -110,18 +111,15 @@ class _VibeViewScreenState extends State<VibeViewScreen>
           children: [
             // Content
             Center(
-              child: Image.network(
-                vibe.mediaUrl,
+              child: CachedNetworkImage(
+                imageUrl: vibe.mediaUrl,
                 fit: BoxFit.scaleDown,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return const Center(
-                    child: CircularProgressIndicator(
-                      color: GossipColors.primary,
-                    ),
-                  );
-                },
-                errorBuilder: (context, _, __) =>
+                placeholder: (context, url) => const Center(
+                  child: CircularProgressIndicator(
+                    color: GossipColors.primary,
+                  ),
+                ),
+                errorWidget: (context, _, __) =>
                     const Icon(Icons.broken_image, color: Colors.white),
               ),
             ),
@@ -170,8 +168,10 @@ class _VibeViewScreenState extends State<VibeViewScreen>
                 children: [
                   CircleAvatar(
                     radius: 20,
-                    backgroundImage: NetworkImage(vibe.avatarUrl ??
-                        'https://picsum.photos/seed/${vibe.username.hashCode}/100'),
+                    backgroundImage: vibe.avatarUrl != null
+                        ? CachedNetworkImageProvider(vibe.avatarUrl!)
+                        : CachedNetworkImageProvider(
+                            'https://picsum.photos/seed/${vibe.username.hashCode}/100'),
                   ),
                   const SizedBox(width: 12),
                   Column(

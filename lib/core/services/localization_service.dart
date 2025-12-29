@@ -19,6 +19,7 @@ class LocalizationService {
       'notifications': 'Notifications',
       'language': 'Language',
       'blocked_users': 'Blocked Users',
+      'share_profile': 'Share Profile',
       'select_language': 'SELECT LANGUAGE.',
     },
     'Hindi (हिन्दी)': {
@@ -40,6 +41,7 @@ class LocalizationService {
       'notifications': 'सूचनाएं',
       'language': 'भाषा',
       'blocked_users': 'अवरुद्ध उपयोगकर्ता',
+      'share_profile': 'प्रोफ़ाइल साझा करें',
       'select_language': 'भाषा चुनें',
     },
     'Tamil (தமிழ்)': {
@@ -61,6 +63,7 @@ class LocalizationService {
       'notifications': 'அறிவிப்புகள்',
       'language': 'மொழி',
       'blocked_users': 'தடைசெய்யப்பட்ட பயனர்கள்',
+      'share_profile': 'சுயவிவரத்தைப் பகிரவும்',
       'select_language': 'மொழியைத் தேர்ந்தெடுக்கவும்',
     },
   };

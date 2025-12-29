@@ -1,8 +1,10 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:gossip/shared/widgets/gradient_text.dart';
 import 'package:gossip/shared/widgets/glass_card.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
@@ -131,8 +133,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onTap: () async {
                   Navigator.pop(context);
                   try {
-                    final XFile? image =
-                        await _picker.pickImage(source: ImageSource.camera);
+                    final XFile? image = await _picker.pickImage(
+                      source: ImageSource.camera,
+                      maxWidth: 512,
+                      maxHeight: 512,
+                      imageQuality: 75,
+                    );
                     if (image != null) _updateAvatar(image);
                   } catch (e) {
                     if (context.mounted) {
@@ -149,8 +155,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: () async {
                 Navigator.pop(context);
                 try {
-                  final XFile? image =
-                      await _picker.pickImage(source: ImageSource.gallery);
+                  final XFile? image = await _picker.pickImage(
+                    source: ImageSource.gallery,
+                    maxWidth: 512,
+                    maxHeight: 512,
+                    imageQuality: 75,
+                  );
                   if (image != null) {
                     _updateAvatar(image);
                   }
@@ -170,6 +180,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _updateAvatar(XFile file) {
     context.read<AuthBloc>().add(AuthProfileUpdateRequested(avatarFile: file));
     // Removed redundant _fetchProfile call and delay to prevent loop
+  }
+
+  void _shareProfile() {
+    final username = _usernameController.text;
+    final name = _fullNameController.text.isNotEmpty
+        ? _fullNameController.text
+        : 'Gossip User';
+
+    if (username.isEmpty) {
+      ToastUtils.showError(
+          context, 'Set a username first to share your profile');
+      return;
+    }
+
+    final message =
+        "Hey! Let's talk on GOSSIP. Add me by clicking here:\ngossip://profile/$username\n\nor search for my username: $username\nMy name is $name.";
+
+    // ignore: deprecated_member_use
+    Share.share(message);
   }
 
   void _saveChanges() {
@@ -297,7 +326,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               child: ClipOval(
                 child: avatarUrl != null
-                    ? Image.network(avatarUrl, fit: BoxFit.cover)
+                    ? CachedNetworkImage(
+                        imageUrl: avatarUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(
+                          color: Colors.white.withValues(alpha: 0.05),
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: GossipColors.primary,
+                            ),
+                          ),
+                        ),
+                        errorWidget: (context, url, error) => Image.network(
+                            'https://picsum.photos/seed/profile/300',
+                            fit: BoxFit.cover),
+                      )
                     : Image.network('https://picsum.photos/seed/profile/300',
                         fit: BoxFit.cover),
               ),
@@ -638,6 +682,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const _SettingsChevron(
                   icon: Icons.info_outline_rounded,
                   label: 'About Us',
+                ),
+              ),
+              GestureDetector(
+                onTap: _shareProfile,
+                behavior: HitTestBehavior.opaque,
+                child: _SettingsChevron(
+                  icon: Icons.share_rounded,
+                  label: _t('share_profile'),
                 ),
               ),
               GestureDetector(

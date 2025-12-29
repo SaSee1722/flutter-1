@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:gossip/shared/widgets/gradient_text.dart';
@@ -241,7 +242,7 @@ class _CallsScreenState extends State<CallsScreen> {
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
             shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+            physics: const BouncingScrollPhysics(),
             itemCount: (calls.length > 20)
                 ? 20
                 : calls.length, // Limit to recent 20 for performance
@@ -293,8 +294,9 @@ class _CallsScreenState extends State<CallsScreen> {
                 leading: CircleAvatar(
                   radius: 24,
                   backgroundColor: GossipColors.primary.withValues(alpha: 0.1),
-                  backgroundImage:
-                      otherAvatar != null ? NetworkImage(otherAvatar) : null,
+                  backgroundImage: otherAvatar != null
+                      ? CachedNetworkImageProvider(otherAvatar)
+                      : null,
                   child: otherAvatar == null
                       ? Text(
                           otherName[0].toUpperCase(),
