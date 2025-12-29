@@ -785,10 +785,13 @@ class _ChatListItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color nameColor;
-    if (room.gender?.toLowerCase() == 'male') {
+    final gender = room.gender?.toLowerCase() ?? '';
+    if (gender == 'male') {
       nameColor = const Color(0xFF87CEEB); // Sky Blue
-    } else if (room.gender?.toLowerCase() == 'female') {
+    } else if (gender == 'female') {
       nameColor = const Color(0xFFF4C2C2); // Baby Pink
+    } else if (gender == 'others' || gender == 'other') {
+      nameColor = const Color(0xFFFFD700); // Golden
     } else {
       nameColor = GossipColors.primary; // Default
     }

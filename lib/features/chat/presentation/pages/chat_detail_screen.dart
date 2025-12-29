@@ -30,7 +30,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:video_player/video_player.dart';
 import 'package:gossip/shared/utils/toast_utils.dart';
 import 'package:gossip/features/chat/presentation/widgets/group_settings_sheet.dart';
-import 'package:gossip/features/chat/presentation/widgets/sticker_picker_sheet.dart';
+
 import 'package:gossip/core/notifications/notification_sound_helper.dart';
 import 'package:gossip/core/utils/date_formatter.dart';
 
@@ -877,48 +877,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
     );
   }
 
-  void _openStickerPicker() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: GossipColors.cardBackground,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.5,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) {
-          return StickerPickerSheet(
-            onStickerSelected: (url, type) {
-              Navigator.pop(context); // Close picker
-              // Send sticker message
-              final userId = Supabase.instance.client.auth.currentUser?.id;
-              if (userId == null) return;
-
-              final message = Message(
-                id: '',
-                roomId: widget.roomId,
-                userId: userId,
-                content: '',
-                status: MessageStatus.sending,
-                createdAt: DateTime.now(),
-                mediaUrl: url,
-                mediaType: 'image', // Treat stickers as images for now
-                mediaName: 'Sticker',
-                senderGender: widget.currentUserGender,
-                senderName: 'You',
-              );
-              context.read<ChatBloc>().add(SendMessageRequested(message));
-            },
-          );
-        },
-      ),
-    );
-  }
-
   void _showGallerySelection() {
     Navigator.pop(context);
     showModalBottomSheet(
@@ -1127,14 +1085,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                           minLines: 1,
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.star_border,
-                            color: Color(0xFFB0B0B0), size: 22),
-                        onPressed: _openStickerPicker,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                      const SizedBox(width: 8),
                       IconButton(
                         icon: const Icon(Icons.attach_file,
                             color: Color(0xFFB0B0B0), size: 22),

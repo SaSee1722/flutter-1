@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../domain/repositories/call_repository.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class WebRTCService {
   final CallRepository _callRepository;
@@ -22,6 +23,18 @@ class WebRTCService {
   };
 
   Future<bool> initLocalStream(bool isVideo) async {
+    // Request permissions first
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      Map<Permission, PermissionStatus> statuses = await [
+        Permission.microphone,
+        Permission.camera,
+        Permission.bluetoothConnect,
+      ].request();
+      debugPrint('Permission statuses: $statuses');
+    }
+
     // We always try to get both to avoid mid-call renegotiation issues
     final Map<String, dynamic> constraints = {
       'audio': true,

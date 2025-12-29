@@ -17,7 +17,7 @@ import '../../features/call/domain/repositories/call_repository.dart';
 import '../../features/call/data/webrtc_service.dart';
 import '../../features/call/presentation/bloc/call_bloc.dart';
 import '../notifications/notification_service.dart';
-import '../services/deep_link_service.dart';
+
 import '../services/call_sound_service.dart';
 
 final sl = GetIt.instance;
@@ -48,7 +48,7 @@ Future<void> init() async {
   // Services
   sl.registerLazySingleton<WebRTCService>(() => WebRTCService(sl()));
   sl.registerLazySingleton<NotificationService>(() => NotificationService());
-  sl.registerLazySingleton<DeepLinkService>(() => DeepLinkService());
+
   sl.registerLazySingleton<CallSoundService>(
       () => CallSoundService()); // Added CallSoundService
 

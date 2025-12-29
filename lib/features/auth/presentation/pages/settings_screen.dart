@@ -5,7 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:share_plus/share_plus.dart';
+
 import 'package:gossip/shared/widgets/gradient_text.dart';
 import 'package:gossip/shared/widgets/glass_card.dart';
 import 'package:gossip/core/theme/gossip_colors.dart';
@@ -190,25 +190,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _toggleVisibility(bool value) async {
     setState(() => _isPublic = value);
     context.read<AuthBloc>().add(AuthProfileUpdateRequested(isPublic: value));
-  }
-
-  void _shareProfile() {
-    final username = _usernameController.text;
-    final name = _fullNameController.text.isNotEmpty
-        ? _fullNameController.text
-        : 'Gossip User';
-
-    if (username.isEmpty) {
-      ToastUtils.showError(
-          context, 'Set a username first to share your profile');
-      return;
-    }
-
-    final message =
-        "Hey! Let's talk on GOSSIP. Add me by clicking here:\nhttps://gossip-messenger.web.app/profile/$username\n\nor search for my username: $username\nMy name is $name.";
-
-    // ignore: deprecated_member_use
-    Share.share(message);
   }
 
   void _saveChanges() {
@@ -720,14 +701,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const _SettingsChevron(
                   icon: Icons.info_outline_rounded,
                   label: 'About Us',
-                ),
-              ),
-              GestureDetector(
-                onTap: _shareProfile,
-                behavior: HitTestBehavior.opaque,
-                child: _SettingsChevron(
-                  icon: Icons.share_rounded,
-                  label: _t('share_profile'),
                 ),
               ),
               GestureDetector(
