@@ -16,6 +16,7 @@ import 'core/notifications/notification_service.dart';
 import 'features/call/presentation/widgets/call_overlay.dart';
 import 'features/chat/presentation/pages/chat_detail_screen.dart';
 import 'features/call/presentation/pages/incoming_call_screen.dart';
+import 'core/services/permission_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +36,9 @@ void main() async {
           defaultTargetPlatform == TargetPlatform.iOS)) {
     await Firebase.initializeApp();
     await di.sl<NotificationService>().initialize();
+
+    // Request all necessary permissions at startup
+    await di.sl<PermissionService>().requestAllPermissions();
   }
 
   runApp(const GossipApp());

@@ -19,6 +19,7 @@ import '../../features/call/presentation/bloc/call_bloc.dart';
 import '../notifications/notification_service.dart';
 
 import '../services/call_sound_service.dart';
+import '../services/permission_service.dart';
 
 final sl = GetIt.instance;
 
@@ -51,6 +52,7 @@ Future<void> init() async {
 
   sl.registerLazySingleton<CallSoundService>(
       () => CallSoundService()); // Added CallSoundService
+  sl.registerLazySingleton<PermissionService>(() => PermissionService());
 
   // Blocs
   sl.registerFactory(() => AuthBloc(sl(), sl()));
