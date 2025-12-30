@@ -332,8 +332,8 @@ class _GroupSettingsSheetState extends State<GroupSettingsSheet> {
     // But let's keep it consistent with chat detail.
     // Since this is a sheet, file picker will open on top.
     final currentContext = context;
-    final success =
-        await NotificationSoundHelper.setCustomSound(chatId: widget.roomId);
+    final success = await NotificationSoundHelper.pickSystemNotificationSound(
+        chatId: widget.roomId);
 
     if (!currentContext.mounted) return;
 

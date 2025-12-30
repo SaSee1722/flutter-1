@@ -1,86 +1,132 @@
-import 'dart:io';
-import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path/path.dart' as path;
 import 'package:flutter/foundation.dart';
 
 class NotificationSoundHelper {
   static const String _defaultSoundKey = 'default_notification_sound';
+  static const String _defaultSoundTitleKey =
+      'default_notification_sound_title';
   static const String _chatSoundPrefix = 'notification_sound_';
+  static const String _chatSoundTitlePrefix = 'notification_sound_title_';
 
-  /// Picks an audio file and saves it as the custom sound for a specific chat
-  /// or as the default sound if chatId is null.
-  static Future<bool> setCustomSound({String? chatId}) async {
+  static const MethodChannel _channel =
+      MethodChannel('com.gossip/ringtone_picker');
+
+  /// Picks a system notification sound using Android's RingtoneManager
+  /// Returns true if a sound was selected, false otherwise
+  static Future<bool> pickSystemNotificationSound({String? chatId}) async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.audio,
-        allowMultiple: false,
-      );
+      final result = await _channel
+          .invokeMethod<Map<Object?, Object?>>('pickNotificationSound');
 
-      if (result != null && result.files.single.path != null) {
-        final File originalFile = File(result.files.single.path!);
-        final Directory appDir = await getApplicationDocumentsDirectory();
-        final String soundDir = path.join(appDir.path, 'notification_sounds');
+      if (result != null) {
+        final uri = result['uri'] as String?;
+        final title = result['title'] as String?;
 
-        // Ensure directory exists
-        await Directory(soundDir).create(recursive: true);
+        if (uri != null && title != null) {
+          final prefs = await SharedPreferences.getInstance();
 
-        final String fileName =
-            '${chatId ?? "default"}_${path.basename(originalFile.path)}';
-        final String savedPath = path.join(soundDir, fileName);
+          if (chatId != null) {
+            // Save for specific chat
+            await prefs.setString('$_chatSoundPrefix$chatId', uri);
+            await prefs.setString('$_chatSoundTitlePrefix$chatId', title);
+          } else {
+            // Save as default
+            await prefs.setString(_defaultSoundKey, uri);
+            await prefs.setString(_defaultSoundTitleKey, title);
+          }
 
-        // Copy file to local storage
-        await originalFile.copy(savedPath);
-
-        // Save preference
-        final prefs = await SharedPreferences.getInstance();
-        final key =
-            chatId != null ? '$_chatSoundPrefix$chatId' : _defaultSoundKey;
-        await prefs.setString(key, savedPath);
-
-        debugPrint('Saved custom sound to: $savedPath');
-        return true;
+          debugPrint('Saved notification sound: $title ($uri)');
+          return true;
+        }
       }
     } catch (e) {
-      debugPrint('Error setting custom sound: $e');
+      debugPrint('Error picking notification sound: $e');
     }
     return false;
   }
 
-  /// Retrieves the saved sound path for a chat, falling back to default app sound.
+  /// Picks a system ringtone using Android's RingtoneManager
+  static Future<bool> pickSystemRingtone() async {
+    try {
+      final result =
+          await _channel.invokeMethod<Map<Object?, Object?>>('pickRingtone');
+
+      if (result != null) {
+        final uri = result['uri'] as String?;
+        final title = result['title'] as String?;
+
+        if (uri != null && title != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('call_ringtone', uri);
+          await prefs.setString('call_ringtone_title', title);
+
+          debugPrint('Saved ringtone: $title ($uri)');
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error picking ringtone: $e');
+    }
+    return false;
+  }
+
+  /// Retrieves the saved sound path/URI for a chat, falling back to default
   static Future<String?> getSoundPath({String? chatId}) async {
     final prefs = await SharedPreferences.getInstance();
 
     // 1. Try Chat specific
     if (chatId != null) {
       final chatSound = prefs.getString('$_chatSoundPrefix$chatId');
-      if (chatSound != null && await File(chatSound).exists()) {
+      if (chatSound != null) {
         return chatSound;
       }
     }
 
     // 2. Try Global default
     final defaultSound = prefs.getString(_defaultSoundKey);
-    if (defaultSound != null && await File(defaultSound).exists()) {
+    if (defaultSound != null) {
       return defaultSound;
     }
 
     return null; // Fallback to system default
   }
 
-  /// Clears a custom sound for a chat or default.
+  /// Gets the title of the saved notification sound
+  static Future<String?> getSoundTitle({String? chatId}) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    if (chatId != null) {
+      final title = prefs.getString('$_chatSoundTitlePrefix$chatId');
+      if (title != null) return title;
+    }
+
+    return prefs.getString(_defaultSoundTitleKey);
+  }
+
+  /// Gets the title of the saved ringtone
+  static Future<String?> getRingtoneTitle() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('call_ringtone_title');
+  }
+
+  /// Clears a custom sound for a chat or default
   static Future<void> clearCustomSound({String? chatId}) async {
     final prefs = await SharedPreferences.getInstance();
-    final key = chatId != null ? '$_chatSoundPrefix$chatId' : _defaultSoundKey;
-    final existingPath = prefs.getString(key);
 
-    if (existingPath != null) {
-      final file = File(existingPath);
-      if (await file.exists()) {
-        await file.delete();
-      }
-      await prefs.remove(key);
+    if (chatId != null) {
+      await prefs.remove('$_chatSoundPrefix$chatId');
+      await prefs.remove('$_chatSoundTitlePrefix$chatId');
+    } else {
+      await prefs.remove(_defaultSoundKey);
+      await prefs.remove(_defaultSoundTitleKey);
     }
+  }
+
+  /// Clears the custom ringtone
+  static Future<void> clearCustomRingtone() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('call_ringtone');
+    await prefs.remove('call_ringtone_title');
   }
 }

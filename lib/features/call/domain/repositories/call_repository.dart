@@ -16,6 +16,7 @@ abstract class CallRepository {
   Future<void> rejectCall(String callId);
   Future<void> endCall(String callId, {int? duration});
   Future<void> updateCallVideoStatus(String callId, bool isVideo);
+  Future<void> updateOffer(String callId, RTCSessionDescription offer);
   Future<void> addIceCandidate(
       String callId, RTCIceCandidate candidate, bool isCaller);
   Stream<List<Map<String, dynamic>>> onIncomingCalls(String userId);
@@ -91,6 +92,13 @@ class SupabaseCallRepository implements CallRepository {
   Future<void> updateCallVideoStatus(String callId, bool isVideo) async {
     await _supabase.from('calls').update({
       'is_video': isVideo,
+    }).eq('id', callId);
+  }
+
+  @override
+  Future<void> updateOffer(String callId, RTCSessionDescription offer) async {
+    await _supabase.from('calls').update({
+      'offer': offer.toMap(),
     }).eq('id', callId);
   }
 

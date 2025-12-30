@@ -91,3 +91,11 @@ class RemoteVideoStatusChanged extends CallEvent {
 }
 
 class RemoteStreamReceived extends CallEvent {}
+
+class RenegotiationOfferReceived extends CallEvent {
+  final RTCSessionDescription offer;
+  const RenegotiationOfferReceived(this.offer);
+
+  @override
+  List<Object?> get props => [offer];
+}

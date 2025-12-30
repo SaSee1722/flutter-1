@@ -1283,8 +1283,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
               onTap: () async {
                 final currentContext = context;
                 Navigator.pop(currentContext);
-                final success = await NotificationSoundHelper.setCustomSound(
-                    chatId: widget.roomId);
+                final success =
+                    await NotificationSoundHelper.pickSystemNotificationSound(
+                        chatId: widget.roomId);
                 if (!currentContext.mounted) return;
                 if (success) {
                   ToastUtils.showSuccess(

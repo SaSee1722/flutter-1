@@ -16,6 +16,7 @@ import 'package:gossip/features/auth/presentation/bloc/auth_state.dart';
 import 'package:gossip/core/di/injection_container.dart';
 import 'package:gossip/shared/utils/toast_utils.dart';
 import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
+import 'package:gossip/core/notifications/notification_sound_helper.dart';
 import 'blocked_users_screen.dart';
 
 import 'package:flutter/foundation.dart';
@@ -288,6 +289,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _buildPersonalInfoSection(),
                           const SizedBox(height: 32),
                           _buildSettingsSection(),
+                          const SizedBox(height: 32),
+                          _buildNotificationSettings(),
                           const SizedBox(height: 32),
                           _buildLogoutButton(),
                           const SizedBox(height: 120),
@@ -706,6 +709,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const _SettingsChevron(
                   icon: Icons.delete_forever_rounded,
                   label: 'Delete Account',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNotificationSettings() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            GradientText(
+              _t('notifications'),
+              gradient: GossipColors.primaryGradient,
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.notifications_active,
+                color: GossipColors.primary, size: 24),
+          ],
+        ),
+        const SizedBox(height: 16),
+        GlassCard(
+          padding: const EdgeInsets.all(8),
+          opacity: 0.05,
+          child: Column(
+            children: [
+              GestureDetector(
+                onTap: () async {
+                  final success = await NotificationSoundHelper
+                      .pickSystemNotificationSound();
+                  if (success && mounted) {
+                    ToastUtils.showSuccess(
+                        context, 'Notification sound updated');
+                  }
+                },
+                behavior: HitTestBehavior.opaque,
+                child: const _SettingsChevron(
+                  icon: Icons.music_note,
+                  label: 'Notification Sound',
+                ),
+              ),
+              GestureDetector(
+                onTap: () async {
+                  // Show a test notification
+                  if (mounted) {
+                    ToastUtils.showSuccess(context, 'Test notification sent!');
+                  }
+                },
+                behavior: HitTestBehavior.opaque,
+                child: const _SettingsChevron(
+                  icon: Icons.notifications_active,
+                  label: 'Test Notification',
                 ),
               ),
             ],

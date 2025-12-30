@@ -379,22 +379,44 @@ class SupabaseChatRepository implements ChatRepository {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
 
-    if (_presenceChannel == null) {
-      _presenceChannel = _supabase.channel('global_presence');
-      // Subscribe to channel (returns void, not Future)
-      _presenceChannel!.subscribe();
-    }
+    try {
+      if (_presenceChannel == null) {
+        _presenceChannel = _supabase.channel('global_presence');
 
-    if (isOnline) {
-      await _presenceChannel!.track({
-        'user_id': user.id,
-        'online': true,
-        'last_seen': DateTime.now().toIso8601String(),
-      });
-      debugPrint('Online status set to true for user: ${user.id}');
-    } else {
-      await _presenceChannel!.untrack();
-      debugPrint('Online status set to false for user: ${user.id}');
+        // Wait for subscription to complete before tracking
+        final completer = Completer<void>();
+        _presenceChannel!.subscribe((status, [error]) {
+          debugPrint('Presence channel subscription status: $status');
+          if (error != null) {
+            debugPrint('Presence channel subscription error: $error');
+            if (!completer.isCompleted) completer.completeError(error);
+          } else if (status == RealtimeSubscribeStatus.subscribed) {
+            if (!completer.isCompleted) completer.complete();
+          }
+        });
+
+        // Wait for subscription to complete (with timeout)
+        await completer.future.timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            debugPrint('Presence channel subscription timeout');
+          },
+        );
+      }
+
+      if (isOnline) {
+        await _presenceChannel!.track({
+          'user_id': user.id,
+          'online': true,
+          'last_seen': DateTime.now().toIso8601String(),
+        });
+        debugPrint('Online status set to true for user: ${user.id}');
+      } else {
+        await _presenceChannel!.untrack();
+        debugPrint('Online status set to false for user: ${user.id}');
+      }
+    } catch (e) {
+      debugPrint('Error setting online status: $e');
     }
   }
 
@@ -404,6 +426,8 @@ class SupabaseChatRepository implements ChatRepository {
 
     // Use the SAME global presence channel
     final channel = _supabase.channel('global_presence');
+
+    bool hasEmittedInitial = false;
 
     channel.onPresenceSync((payload) {
       debugPrint('Presence sync for user $userId');
@@ -446,16 +470,30 @@ class SupabaseChatRepository implements ChatRepository {
       }
 
       debugPrint('User $userId online status: $isOnline');
-      if (!controller.isClosed) controller.add(isOnline);
-    });
-
-    // Subscribe to the channel
-    channel.subscribe((status, [error]) {
-      debugPrint('Presence channel subscription status: $status');
-      if (error != null) {
-        debugPrint('Presence channel error: $error');
+      if (!controller.isClosed) {
+        controller.add(isOnline);
+        hasEmittedInitial = true;
       }
     });
+
+    // Subscribe to the channel with proper error handling
+    channel.subscribe((status, [error]) {
+      debugPrint('Presence channel subscription status for $userId: $status');
+      if (error != null) {
+        debugPrint('Presence channel error: $error');
+        if (!controller.isClosed && !hasEmittedInitial) {
+          controller.add(false); // Default to offline on error
+        }
+      } else if (status == RealtimeSubscribeStatus.subscribed) {
+        debugPrint('Successfully subscribed to presence channel for $userId');
+        // Initial state will be emitted via onPresenceSync
+      }
+    });
+
+    controller.onCancel = () {
+      // Don't unsubscribe the global channel, just close this controller
+      controller.close();
+    };
 
     return controller.stream;
   }

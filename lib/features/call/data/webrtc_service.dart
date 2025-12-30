@@ -11,6 +11,7 @@ class WebRTCService {
   MediaStream? get localStream => _localStream;
   Function(MediaStream)? onRemoteStream;
   Function(String)? onStatusUpdate;
+  Function(RTCSessionDescription)? onRenegotiationNeeded;
 
   WebRTCService(this._callRepository);
 
@@ -36,8 +37,17 @@ class WebRTCService {
     }
 
     // We always try to get both to avoid mid-call renegotiation issues
+    // Use explicit audio constraints for better mobile compatibility
     final Map<String, dynamic> constraints = {
-      'audio': true,
+      'audio': {
+        'echoCancellation': true,
+        'noiseSuppression': true,
+        'autoGainControl': true,
+        'googEchoCancellation': true,
+        'googNoiseSuppression': true,
+        'googAutoGainControl': true,
+        'googHighpassFilter': true,
+      },
       'video': true,
     };
 
@@ -72,7 +82,15 @@ class WebRTCService {
       if (isVideo) {
         debugPrint('Full media access failed, trying audio only: $e');
         final audioOnly = await navigator.mediaDevices.getUserMedia({
-          'audio': true,
+          'audio': {
+            'echoCancellation': true,
+            'noiseSuppression': true,
+            'autoGainControl': true,
+            'googEchoCancellation': true,
+            'googNoiseSuppression': true,
+            'googAutoGainControl': true,
+            'googHighpassFilter': true,
+          },
           'video': false,
         });
         _localStream = audioOnly;
@@ -204,6 +222,14 @@ class WebRTCService {
           await _localStream!.addTrack(videoTrack);
           if (_peerConnection != null) {
             await _peerConnection!.addTrack(videoTrack, _localStream!);
+
+            // CRITICAL: Renegotiate the connection so the other peer receives the video
+            debugPrint('Video track added, triggering renegotiation');
+            final offer = await _peerConnection!.createOffer();
+            await _peerConnection!.setLocalDescription(offer);
+
+            // Notify the bloc to send this new offer to the remote peer
+            onRenegotiationNeeded?.call(offer);
           }
         }
       } catch (e) {

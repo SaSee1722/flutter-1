@@ -1,7 +1,7 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 
 serve(async (req: Request) => {
-    const html = `
+  const html = `
     <!DOCTYPE html>
     <html>
     <head>
@@ -74,7 +74,7 @@ serve(async (req: Request) => {
     </html>
   `
 
-    return new Response(html, {
-        headers: { "content-type": "text/html" },
-    })
+  return new Response(html, {
+    headers: { "content-type": "text/html" },
+  })
 })

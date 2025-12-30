@@ -83,9 +83,15 @@ class CallBloc extends Bloc<CallEvent, CallState> {
       }
     });
 
+    on<RenegotiationOfferReceived>(_onRenegotiationOfferReceived);
+
     _webRTCService.onRemoteStream = (stream) {
       remoteRenderer.srcObject = stream;
       add(RemoteStreamReceived());
+    };
+
+    _webRTCService.onRenegotiationNeeded = (offer) {
+      add(RenegotiationOfferReceived(offer));
     };
   }
 
@@ -302,6 +308,24 @@ class CallBloc extends Bloc<CallEvent, CallState> {
           add(const RemoteVideoStatusChanged(true));
         }
       }
+
+      // Handle renegotiation (offer update during active call)
+      if (state is CallActive && update['offer'] != null) {
+        // Only process if we're not the caller (to avoid processing our own offer)
+        if (!(state is CallRinging && !(state as CallRinging).isIncoming)) {
+          final offerMap = update['offer'] as Map<String, dynamic>;
+          final offer = RTCSessionDescription(
+            offerMap['sdp'],
+            offerMap['type'],
+          );
+          // Apply the new offer as remote description
+          _webRTCService.setRemoteDescription(offer).then((_) {
+            debugPrint('Renegotiation offer applied from remote peer');
+          }).catchError((e) {
+            debugPrint('Error applying renegotiation offer: $e');
+          });
+        }
+      }
     });
   }
 
@@ -444,6 +468,20 @@ class CallBloc extends Bloc<CallEvent, CallState> {
     await Future.delayed(const Duration(seconds: 2));
     if (!emit.isDone) {
       emit(CallIdle());
+    }
+  }
+
+  Future<void> _onRenegotiationOfferReceived(
+      RenegotiationOfferReceived event, Emitter<CallState> emit) async {
+    final currentState = state;
+    if (currentState is! CallActive) return;
+
+    try {
+      // Update the offer in the database so the remote peer receives it
+      await _callRepository.updateOffer(currentState.callId, event.offer);
+      debugPrint('Renegotiation offer sent to remote peer');
+    } catch (e) {
+      debugPrint('Error sending renegotiation offer: $e');
     }
   }
 

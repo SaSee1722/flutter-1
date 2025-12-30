@@ -53,6 +53,9 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
+    // Create notification channels for Android
+    await _createNotificationChannels();
+
     // 3. Setup FCM Handlers
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
@@ -103,6 +106,57 @@ class NotificationService {
     uploadTokenToSupabase();
   }
 
+  /// Creates Android notification channels
+  Future<void> _createNotificationChannels() async {
+    // Channel for chat messages
+    const chatChannel = AndroidNotificationChannel(
+      'chat_messages',
+      'Chat Messages',
+      description: 'Notifications for new gossip messages',
+      importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    // Channel for incoming calls
+    const callChannel = AndroidNotificationChannel(
+      'incoming_calls',
+      'Incoming Calls',
+      description: 'Notifications for incoming calls',
+      importance: Importance.max,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    // Channel for friend requests
+    const friendRequestChannel = AndroidNotificationChannel(
+      'friend_requests',
+      'Friend Requests',
+      description: 'Notifications for new friend requests',
+      importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    // Create channels
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(chatChannel);
+
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(callChannel);
+
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(friendRequestChannel);
+
+    debugPrint('Notification channels created');
+  }
+
   /// Uploads the current FCM token to Supabase profiles table
   Future<void> uploadTokenToSupabase() async {
     final user = Supabase.instance.client.auth.currentUser;
@@ -142,7 +196,7 @@ class NotificationService {
         await NotificationSoundHelper.getSoundPath(chatId: chatId);
 
     final androidDetails = AndroidNotificationDetails(
-      'chat_messages_${customSoundPath?.hashCode ?? "default"}', // Different channel per sound
+      'chat_messages', // Use consistent channel ID
       'Chat Messages',
       channelDescription: 'Notifications for new gossip messages',
       importance: Importance.max,
@@ -151,6 +205,7 @@ class NotificationService {
           ? UriAndroidNotificationSound(customSoundPath)
           : null,
       playSound: true,
+      enableVibration: true,
     );
 
     final iosDetails = DarwinNotificationDetails(
@@ -227,7 +282,7 @@ class NotificationService {
       android: const AndroidParams(
         isCustomNotification: true,
         isShowLogo: false,
-        ringtonePath: 'system_ringtone_default',
+        ringtonePath: null, // Use system default ringtone
         backgroundColor: '#075E54',
         backgroundUrl: 'https://i.pravatar.cc/500',
         actionColor: '#4CAF50',
@@ -244,7 +299,7 @@ class NotificationService {
         supportsHolding: true,
         supportsGrouping: false,
         supportsUngrouping: false,
-        ringtonePath: 'system_ringtone_default',
+        ringtonePath: null, // Use system default ringtone
       ),
     );
 
