@@ -293,7 +293,7 @@ class NotificationService {
       android: const AndroidParams(
         isCustomNotification: true,
         isShowLogo: false,
-        ringtonePath: null, // Use system default ringtone
+        ringtonePath: 'system_ringtone_default', // Use system default ringtone
         backgroundColor: '#075E54',
         backgroundUrl: 'https://i.pravatar.cc/500',
         actionColor: '#4CAF50',
@@ -310,7 +310,7 @@ class NotificationService {
         supportsHolding: true,
         supportsGrouping: false,
         supportsUngrouping: false,
-        ringtonePath: null, // Use system default ringtone
+        ringtonePath: 'system_ringtone_default', // Use system default ringtone
       ),
     );
 

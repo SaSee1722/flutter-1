@@ -383,7 +383,6 @@ class SupabaseChatRepository implements ChatRepository {
       if (_presenceChannel == null) {
         _presenceChannel = _supabase.channel('global_presence');
 
-        // Wait for subscription to complete before tracking
         final completer = Completer<void>();
         _presenceChannel!.subscribe((status, [error]) {
           debugPrint('Presence channel subscription status: $status');
@@ -395,9 +394,8 @@ class SupabaseChatRepository implements ChatRepository {
           }
         });
 
-        // Wait for subscription to complete (with timeout)
         await completer.future.timeout(
-          const Duration(seconds: 5),
+          const Duration(seconds: 10),
           onTimeout: () {
             debugPrint('Presence channel subscription timeout');
           },
@@ -450,19 +448,22 @@ class SupabaseChatRepository implements ChatRepository {
         try {
           if (presence is Map) {
             data = Map<String, dynamic>.from(presence);
+          } else if (presence is Presence) {
+            data = presence.payload;
           } else {
             data = (presence as dynamic).payload as Map<String, dynamic>?;
           }
         } catch (_) {
-          if (presence is Map<String, dynamic>) {
-            data = presence;
-          }
+          try {
+            data = (presence as dynamic) as Map<String, dynamic>?;
+          } catch (_) {}
         }
 
         if (data != null) {
-          debugPrint(
-              'Checking presence: user_id=${data['user_id']}, online=${data['online']}');
-          if (data['user_id'] == userId && data['online'] == true) {
+          final pUserId = data['user_id']?.toString();
+          final isOnlineFlag = data['online'] == true;
+
+          if (pUserId == userId && isOnlineFlag) {
             isOnline = true;
             break;
           }

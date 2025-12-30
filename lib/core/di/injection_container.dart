@@ -53,7 +53,7 @@ Future<void> init() async {
       () => CallSoundService()); // Added CallSoundService
 
   // Blocs
-  sl.registerFactory(() => AuthBloc(sl()));
+  sl.registerFactory(() => AuthBloc(sl(), sl()));
   sl.registerFactory(() => ChatBloc(sl()));
   sl.registerFactory(() => VibeBloc(sl()));
   sl.registerLazySingleton(() => CallBloc(

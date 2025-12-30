@@ -86,6 +86,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
     on<RenegotiationOfferReceived>(_onRenegotiationOfferReceived);
 
     _webRTCService.onRemoteStream = (stream) {
+      debugPrint('[CallBloc] Remote stream callback triggered');
       remoteRenderer.srcObject = stream;
       add(RemoteStreamReceived());
     };
@@ -378,6 +379,12 @@ class CallBloc extends Bloc<CallEvent, CallState> {
         isSpeakerOn: true,
         lastUpdate: DateTime.now(),
       ));
+
+      // DOUBLE CHECK: Re-assign srcObject if stream already exists
+      if (_webRTCService.localStream != null) {
+        localRenderer.srcObject = _webRTCService.localStream;
+      }
+
       _startCallTimer();
       await _soundService.playConnected();
     }

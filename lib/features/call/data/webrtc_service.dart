@@ -143,6 +143,10 @@ class WebRTCService {
         debugPrint(
             '[WebRTC] Remote stream set with ${_remoteStream!.getTracks().length} tracks');
         onRemoteStream?.call(_remoteStream!);
+      } else {
+        debugPrint(
+            '[WebRTC] No stream in onTrack, creating one for ${event.track.id}');
+        _ensureRemoteStreamAndAddTrack(event.track);
       }
     };
 
@@ -212,6 +216,10 @@ class WebRTCService {
         debugPrint(
             '[WebRTC] Remote stream set with ${_remoteStream!.getTracks().length} tracks');
         onRemoteStream?.call(_remoteStream!);
+      } else {
+        debugPrint(
+            '[WebRTC] No stream in onTrack, creating one for ${event.track.id}');
+        _ensureRemoteStreamAndAddTrack(event.track);
       }
     };
 
@@ -310,9 +318,18 @@ class WebRTCService {
     });
   }
 
+  Future<void> _ensureRemoteStreamAndAddTrack(MediaStreamTrack track) async {
+    _remoteStream ??= await createLocalMediaStream('remote_stream_${track.id}');
+    await _remoteStream!.addTrack(track);
+    debugPrint(
+        '[WebRTC] Track added to remote stream. Total tracks: ${_remoteStream!.getTracks().length}');
+    onRemoteStream?.call(_remoteStream!);
+  }
+
   void dispose() {
     _localStream?.getTracks().forEach((t) => t.stop());
     _localStream?.dispose();
+    _remoteStream?.getTracks().forEach((t) => t.stop());
     _remoteStream?.dispose();
     _peerConnection?.dispose();
   }

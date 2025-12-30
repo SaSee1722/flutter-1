@@ -134,15 +134,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       // For DMs, we need the other user's ID
       try {
         final res = await Supabase.instance.client
-            .from('friend_requests')
-            .select('sender_id, receiver_id')
-            .eq('id', widget.roomId)
-            .maybeSingle();
+            .from('room_members')
+            .select('user_id')
+            .eq('room_id', widget.roomId);
 
-        if (res != null) {
+        if ((res as List).isNotEmpty) {
           final myId = Supabase.instance.client.auth.currentUser?.id;
-          final otherId =
-              res['sender_id'] == myId ? res['receiver_id'] : res['sender_id'];
+          final List members = res as List;
+          final otherMember = members.firstWhere(
+            (m) => m['user_id'] != myId,
+            orElse: () => null,
+          );
+          final otherId = otherMember?['user_id'];
 
           if (mounted) setState(() => _otherUserId = otherId);
 

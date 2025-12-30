@@ -4,11 +4,13 @@ import 'auth_event.dart';
 import 'auth_state.dart';
 import 'package:gossip/core/notifications/notification_service.dart';
 import 'package:gossip/core/di/injection_container.dart' as di;
+import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final AuthRepository _authRepository;
+  final ChatRepository _chatRepository;
 
-  AuthBloc(this._authRepository) : super(AuthInitial()) {
+  AuthBloc(this._authRepository, this._chatRepository) : super(AuthInitial()) {
     on<AuthCheckRequested>(_onAuthCheckRequested);
     on<AuthSignUpRequested>(_onAuthSignUpRequested);
     on<AuthSignInRequested>(_onAuthSignInRequested);
@@ -22,6 +24,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) async {
     final user = _authRepository.currentUser;
     if (user != null) {
+      _chatRepository.setOnlineStatus(true);
       emit(AuthAuthenticated(user));
     } else {
       emit(AuthUnauthenticated());
@@ -65,6 +68,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final user = _authRepository.currentUser;
       if (user != null) {
         di.sl<NotificationService>().uploadTokenToSupabase();
+        _chatRepository.setOnlineStatus(true);
         emit(AuthAuthenticated(user));
       } else {
         emit(AuthUnauthenticated());
@@ -78,6 +82,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthLogoutRequested event,
     Emitter<AuthState> emit,
   ) async {
+    await _chatRepository.setOnlineStatus(false);
     await _authRepository.signOut();
     emit(AuthUnauthenticated());
   }
