@@ -23,6 +23,7 @@ import 'package:gossip/core/di/injection_container.dart';
 import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
 import 'package:gossip/features/chat/domain/entities/friend_request.dart';
 import 'package:gossip/core/utils/date_formatter.dart';
+import 'package:gossip/shared/widgets/typing_dots.dart';
 import 'search/search_users_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
@@ -881,7 +882,7 @@ class _ChatListItem extends StatelessWidget {
                   if (isTyping) {
                     return Row(
                       children: [
-                        _TypingDots(),
+                        const TypingDots(),
                         const SizedBox(width: 6),
                         const Text(
                           'typing...',
@@ -924,41 +925,6 @@ class _ChatListItem extends StatelessWidget {
             ),
           ).animate().scale(duration: 300.ms),
       ],
-    );
-  }
-}
-class _TypingDots extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(
-        3,
-        (i) => Container(
-          margin: const EdgeInsets.symmetric(horizontal: 2),
-          width: 4,
-          height: 4,
-          decoration: const BoxDecoration(
-            color: GossipColors.primary,
-            shape: BoxShape.circle,
-          ),
-        )
-            .animate(onPlay: (c) => c.repeat())
-            .moveY(
-              duration: 300.ms,
-              delay: (i * 150).ms,
-              begin: 0,
-              end: -4,
-              curve: Curves.easeInOut,
-            )
-            .then()
-            .moveY(
-              duration: 300.ms,
-              begin: -4,
-              end: 0,
-              curve: Curves.easeInOut,
-            ),
-      ),
     );
   }
 }

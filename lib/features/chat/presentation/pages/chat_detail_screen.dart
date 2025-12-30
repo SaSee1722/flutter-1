@@ -33,6 +33,7 @@ import 'package:gossip/features/chat/presentation/widgets/group_settings_sheet.d
 import 'package:gossip/core/notifications/notification_service.dart';
 import 'package:gossip/core/notifications/notification_sound_helper.dart';
 import 'package:gossip/core/utils/date_formatter.dart';
+import 'package:gossip/shared/widgets/typing_dots.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String roomId;
@@ -328,14 +329,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                           color: Colors.white,
                           letterSpacing: 1.0)),
                   if (_typingUserName != null)
-                    Text(
-                      '${_typingUserName!.toUpperCase()} TYPING...',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: GossipColors.primary,
-                        letterSpacing: 1.5,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          '${_typingUserName!.toUpperCase()} TYPING',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: GossipColors.primary,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const TypingDots(dotSize: 3, spacing: 1),
+                      ],
                     )
                   else if (widget.isGroup)
                     Text(
@@ -2147,30 +2154,7 @@ class _TypingIndicator extends StatelessWidget {
                     style:
                         const TextStyle(color: Colors.white54, fontSize: 12)),
                 const SizedBox(width: 8),
-                Row(
-                  children: List.generate(
-                      3,
-                      (i) => Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
-                            width: 5,
-                            height: 5,
-                            decoration: const BoxDecoration(
-                                color: Colors.white, shape: BoxShape.circle),
-                          )
-                              .animate(onPlay: (c) => c.repeat())
-                              .moveY(
-                                  duration: 300.ms,
-                                  delay: (i * 150).ms,
-                                  begin: 0,
-                                  end: -5,
-                                  curve: Curves.easeInOut)
-                              .then()
-                              .moveY(
-                                  duration: 300.ms,
-                                  begin: -5,
-                                  end: 0,
-                                  curve: Curves.easeInOut)),
-                ),
+                const TypingDots(color: Colors.white, dotSize: 5, spacing: 2),
               ],
             ),
           ),
