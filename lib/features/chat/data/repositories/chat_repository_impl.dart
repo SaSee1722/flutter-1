@@ -10,6 +10,12 @@ class SupabaseChatRepository implements ChatRepository {
   final SupabaseClient _supabase;
   RealtimeChannel? _presenceChannel;
   final Map<String, RealtimeChannel> _typingChannels = {};
+  final Map<String, bool> _typingCache = {};
+
+  // For centralized stream management to avoid memory leaks/log spam
+  final Map<String, StreamController<bool>> _onlineControllers = {};
+  final Map<String, StreamController<String?>> _typingControllers = {};
+  final Map<String, StreamController<int>> _groupPresenceControllers = {};
 
   SupabaseChatRepository(this._supabase);
 
@@ -303,25 +309,14 @@ class SupabaseChatRepository implements ChatRepository {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
 
+    // Avoid redundant calls
+    if (_typingCache[roomId] == isTyping) return;
+    _typingCache[roomId] = isTyping;
+
     try {
       if (!_typingChannels.containsKey(roomId)) {
         final channel = _supabase.channel('typing_$roomId');
-        final completer = Completer<void>();
-
-        channel.subscribe((status, [error]) {
-          debugPrint('Typing channel $roomId status: $status');
-          if (status == RealtimeSubscribeStatus.subscribed) {
-            if (!completer.isCompleted) completer.complete();
-          } else if (error != null) {
-            if (!completer.isCompleted) completer.completeError(error);
-          }
-        });
-
-        await completer.future.timeout(
-          const Duration(seconds: 5),
-          onTimeout: () =>
-              debugPrint('Typing channel $roomId subscription timeout'),
-        );
+        channel.subscribe();
         _typingChannels[roomId] = channel;
       }
 
@@ -331,24 +326,28 @@ class SupabaseChatRepository implements ChatRepository {
           'user_id': user.id,
           'typing': true,
         });
-        debugPrint('User ${user.id} is typing in room $roomId');
       } else {
         await channel.untrack();
-        debugPrint('User ${user.id} stopped typing in room $roomId');
       }
     } catch (e) {
       debugPrint('Error setting typing status: $e');
+      _typingCache.remove(roomId); // Reset cache on error
     }
   }
 
   @override
   Stream<String?> watchTypingStatus(String roomId) {
+    if (_typingControllers.containsKey(roomId)) {
+      return _typingControllers[roomId]!.stream;
+    }
+
     final controller = StreamController<String?>.broadcast();
+    _typingControllers[roomId] = controller;
+
     final myId = _supabase.auth.currentUser?.id;
     final channel = _supabase.channel('typing_$roomId');
 
     channel.onPresenceSync((payload) {
-      debugPrint('Typing sync for room $roomId');
       final dynamic state = channel.presenceState();
       String? typingUserId;
 
@@ -361,23 +360,30 @@ class SupabaseChatRepository implements ChatRepository {
         presences.addAll(state);
       }
 
-      debugPrint('Typing presences count: ${presences.length}');
-
       for (final presence in presences) {
         Map<String, dynamic>? pMap;
         try {
           if (presence is Map) {
             pMap = Map<String, dynamic>.from(presence);
+          } else if (presence is Presence) {
+            pMap = presence.payload;
           } else {
             pMap = (presence as dynamic).payload as Map<String, dynamic>?;
           }
-        } catch (_) {}
+        } catch (_) {
+          try {
+            pMap = (presence as dynamic) as Map<String, dynamic>?;
+          } catch (_) {}
+        }
 
         if (pMap != null && pMap['user_id'] != myId && pMap['typing'] == true) {
           typingUserId = pMap['user_id'] as String?;
-          debugPrint('User $typingUserId is typing');
           break;
         }
+      }
+
+      if (typingUserId != null) {
+        debugPrint('[Typing] Detected typing user: $typingUserId');
       }
 
       if (!controller.isClosed) {
@@ -385,13 +391,41 @@ class SupabaseChatRepository implements ChatRepository {
       }
     });
 
-    // Subscribe to channel
-    channel.subscribe((status, [error]) {
-      debugPrint('Typing channel subscription status: $status');
-      if (error != null) {
-        debugPrint('Typing channel error: $error');
+    channel.subscribe();
+
+    // Trigger initial check
+    Timer.run(() {
+      if (!controller.isClosed) {
+        final dynamic state = channel.presenceState();
+        final presences = <dynamic>[];
+        if (state is Map) {
+          for (var v in state.values) {
+            if (v is List) presences.addAll(v);
+          }
+        } else if (state is List) {
+          presences.addAll(state);
+        }
+
+        String? typingId;
+        for (final p in presences) {
+          final data = _parsePresenceData(p);
+          if (data != null &&
+              data['user_id'] != myId &&
+              data['typing'] == true) {
+            typingId = data['user_id']?.toString();
+            break;
+          }
+        }
+        controller.add(typingId);
       }
     });
+
+    controller.onCancel = () {
+      _typingControllers.remove(roomId);
+      if (controller.hasListener == false) {
+        controller.close();
+      }
+    };
 
     return controller.stream;
   }
@@ -436,77 +470,99 @@ class SupabaseChatRepository implements ChatRepository {
       }
     } catch (e) {
       debugPrint('Error setting online status: $e');
+      _presenceChannel = null;
     }
   }
 
   @override
   Stream<bool> watchUserOnlineStatus(String userId) {
+    if (_onlineControllers.containsKey(userId)) {
+      return _onlineControllers[userId]!.stream;
+    }
+
     final controller = StreamController<bool>.broadcast();
+    _onlineControllers[userId] = controller;
 
-    // Use the SAME global presence channel
-    final channel = _supabase.channel('global_presence');
+    if (_presenceChannel == null) {
+      _presenceChannel = _supabase.channel('global_presence');
 
-    channel.onPresenceSync((payload) {
-      debugPrint('Presence sync for user $userId');
-      final dynamic state = channel.presenceState();
-      bool isOnline = false;
+      _presenceChannel!.onPresenceSync((payload) {
+        final dynamic state = _presenceChannel!.presenceState();
 
-      final presences = <dynamic>[];
-      if (state is Map) {
-        for (var v in state.values) {
-          if (v is List) presences.addAll(v);
-        }
-      } else if (state is List) {
-        presences.addAll(state);
-      }
-
-      debugPrint('Total presences: ${presences.length}');
-
-      for (final presence in presences) {
-        Map<String, dynamic>? data;
-        try {
-          if (presence is Map) {
-            data = Map<String, dynamic>.from(presence);
-          } else if (presence is Presence) {
-            data = presence.payload;
-          } else {
-            data = (presence as dynamic).payload as Map<String, dynamic>?;
+        final allPresences = <dynamic>[];
+        if (state is Map) {
+          for (var v in state.values) {
+            if (v is List) allPresences.addAll(v);
           }
-        } catch (_) {
-          try {
-            data = (presence as dynamic) as Map<String, dynamic>?;
-          } catch (_) {}
+        } else if (state is List) {
+          allPresences.addAll(state);
         }
 
-        if (data != null) {
-          final pUserId = data['user_id']?.toString();
-          final isOnlineFlag = data['online'] == true;
+        // Notify all active watchers
+        _onlineControllers.forEach((id, ctrl) {
+          bool isUserOnline = false;
+          for (final presence in allPresences) {
+            Map<String, dynamic>? data;
+            try {
+              if (presence is Map) {
+                data = Map<String, dynamic>.from(presence);
+              } else if (presence is Presence) {
+                data = presence.payload;
+              } else {
+                data = (presence as dynamic).payload as Map<String, dynamic>?;
+              }
+            } catch (_) {
+              try {
+                data = (presence as dynamic) as Map<String, dynamic>?;
+              } catch (_) {}
+            }
 
-          if (pUserId == userId && isOnlineFlag) {
+            if (data != null &&
+                data['user_id']?.toString() == id &&
+                data['online'] == true) {
+              isUserOnline = true;
+              break;
+            }
+          }
+          if (!ctrl.isClosed) ctrl.add(isUserOnline);
+        });
+      });
+
+      _presenceChannel!.subscribe();
+    }
+
+    // Initial check for this user
+    Timer.run(() {
+      if (!controller.isClosed) {
+        final dynamic state = _presenceChannel!.presenceState();
+        final allPresences = <dynamic>[];
+        if (state is Map) {
+          for (var v in state.values) {
+            if (v is List) allPresences.addAll(v);
+          }
+        } else if (state is List) {
+          allPresences.addAll(state);
+        }
+
+        bool isOnline = false;
+        for (final p in allPresences) {
+          final data = _parsePresenceData(p);
+          if (data != null &&
+              data['user_id']?.toString() == userId &&
+              data['online'] == true) {
             isOnline = true;
             break;
           }
         }
-      }
-
-      debugPrint('User $userId online status: $isOnline');
-      if (!controller.isClosed) {
         controller.add(isOnline);
       }
     });
 
-    // Subscribe to the channel with proper error handling
-    channel.subscribe((status, [error]) {
-      debugPrint('Presence stream status for $userId: $status');
-      if (status == RealtimeSubscribeStatus.subscribed) {
-        // Force a sync check immediately after subscription
-        debugPrint('Subscribed to presence for $userId, tracking sync...');
-      }
-    });
-
     controller.onCancel = () {
-      // Don't unsubscribe the global channel, just close this controller
-      controller.close();
+      _onlineControllers.remove(userId);
+      if (controller.hasListener == false) {
+        controller.close();
+      }
     };
 
     return controller.stream;
@@ -514,7 +570,13 @@ class SupabaseChatRepository implements ChatRepository {
 
   @override
   Stream<int> watchGroupPresence(String roomId) {
-    final controller = StreamController<int>();
+    if (_groupPresenceControllers.containsKey(roomId)) {
+      return _groupPresenceControllers[roomId]!.stream;
+    }
+
+    final controller = StreamController<int>.broadcast();
+    _groupPresenceControllers[roomId] = controller;
+
     final channel = _supabase.channel('group_presence_$roomId');
 
     channel.onPresenceSync((payload) {
@@ -538,11 +600,7 @@ class SupabaseChatRepository implements ChatRepository {
           } else {
             data = (presence as dynamic).payload as Map<String, dynamic>?;
           }
-        } catch (_) {
-          if (presence is Map<String, dynamic>) {
-            data = presence;
-          }
-        }
+        } catch (_) {}
 
         if (data != null && data['online'] == true) {
           count++;
@@ -550,20 +608,21 @@ class SupabaseChatRepository implements ChatRepository {
       }
 
       if (!controller.isClosed) controller.add(count);
-    }).subscribe();
+    });
 
-    // Also need to track ourselves in this group when we watch it
     final user = _supabase.auth.currentUser;
-    if (user != null) {
-      channel.subscribe((status, [error]) async {
-        if (status == RealtimeSubscribeStatus.subscribed) {
-          await channel.track({
-            'user_id': user.id,
-            'online': true,
-          });
-        }
-      });
-    }
+    channel.subscribe((status, [error]) {
+      if (status == RealtimeSubscribeStatus.subscribed && user != null) {
+        channel.track({'user_id': user.id, 'online': true});
+      }
+    });
+
+    controller.onCancel = () {
+      _groupPresenceControllers.remove(roomId);
+      if (controller.hasListener == false) {
+        controller.close();
+      }
+    };
 
     return controller.stream;
   }
@@ -937,5 +996,19 @@ class SupabaseChatRepository implements ChatRepository {
         .select()
         .eq('id', userId)
         .maybeSingle();
+  }
+
+  Map<String, dynamic>? _parsePresenceData(dynamic presence) {
+    try {
+      if (presence is Map) return Map<String, dynamic>.from(presence);
+      if (presence is Presence) return presence.payload;
+      return (presence as dynamic).payload as Map<String, dynamic>?;
+    } catch (_) {
+      try {
+        return (presence as dynamic) as Map<String, dynamic>?;
+      } catch (_) {
+        return null;
+      }
+    }
   }
 }

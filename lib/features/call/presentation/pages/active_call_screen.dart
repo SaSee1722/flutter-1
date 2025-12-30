@@ -164,8 +164,11 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
     final renderers = widget.state.remoteRenderers.values.toList();
 
     if (renderers.length == 1) {
+      final renderer = renderers.first;
       return RTCVideoView(
-        renderers.first,
+        renderer,
+        key: ValueKey(
+            'remote_video_${renderer.hashCode}_${renderer.srcObject?.id}_${renderer.srcObject?.getVideoTracks().length}'),
         objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
       );
     }

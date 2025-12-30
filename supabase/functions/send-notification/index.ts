@@ -140,17 +140,41 @@ async function sendToUsers(supabase: any, userIds: string[], data: any, priority
     if (!profiles || profiles.length === 0) return new Response('No tokens')
 
     const fetchPromises = profiles.map(async (p: any) => {
+        // Prepare notification content based on data type
+        let title = 'Gossip'
+        let body = 'New update'
+
+        if (data.type === 'chat') {
+            title = data.senderName
+            body = 'Sent you a message'
+        } else if (data.type === 'call') {
+            title = 'Incoming Call'
+            body = `${data.callerName} is calling you`
+        } else if (data.type === 'friend_request') {
+            title = 'Friend Request'
+            body = `${data.senderName} wants to be your friend`
+        }
+
         const fcmPayload = {
             message: {
                 token: p.fcm_token,
+                notification: {
+                    title: title,
+                    body: body,
+                },
                 data: data,
                 android: {
                     priority: priority,
+                    notification: {
+                        channel_id: data.type === 'call' ? 'incoming_calls' : 'chat_messages',
+                        sound: 'default',
+                    },
                 },
                 apns: {
                     payload: {
                         aps: {
                             'content-available': 1,
+                            sound: 'default',
                         },
                     },
                 },

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -165,7 +166,21 @@ class NotificationService {
     if (user == null) return;
 
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      String? token;
+      if (kIsWeb) {
+        debugPrint(
+            '[NotificationService] Web environment detected, attempting to get FCM token safely...');
+        try {
+          // On Web, Firebase might throw special errors if not supported or configured
+          token = await FirebaseMessaging.instance.getToken();
+        } catch (e) {
+          debugPrint('[NotificationService] Failed to get Web FCM token: $e');
+          return;
+        }
+      } else {
+        token = await FirebaseMessaging.instance.getToken();
+      }
+
       if (token != null) {
         await Supabase.instance.client
             .from('profiles')
