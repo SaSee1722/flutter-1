@@ -24,6 +24,8 @@ class WebRTCService {
   };
 
   Future<bool> initLocalStream(bool isVideo) async {
+    debugPrint('[WebRTC] Initializing local stream (isVideo: $isVideo)');
+
     // Request permissions first
     if (!kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
@@ -33,7 +35,7 @@ class WebRTCService {
         Permission.camera,
         Permission.bluetoothConnect,
       ].request();
-      debugPrint('Permission statuses: $statuses');
+      debugPrint('[WebRTC] Permission statuses: $statuses');
     }
 
     // We always try to get both to avoid mid-call renegotiation issues
@@ -64,7 +66,13 @@ class WebRTCService {
       // CRITICAL: Ensure audio tracks are enabled
       _localStream?.getAudioTracks().forEach((track) {
         track.enabled = true;
-        debugPrint('Audio track enabled: ${track.id}');
+        debugPrint(
+            '[WebRTC] Local audio track added: ${track.id}, enabled: ${track.enabled}');
+      });
+
+      _localStream?.getVideoTracks().forEach((track) {
+        debugPrint(
+            '[WebRTC] Local video track added: ${track.id}, enabled: ${track.enabled}');
       });
 
       // Ensure audio is routed correctly (Mobile only)
