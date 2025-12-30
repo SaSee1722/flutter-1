@@ -304,38 +304,30 @@ class SupabaseChatRepository implements ChatRepository {
 
     final channel = _supabase.channel('typing_$roomId');
 
-    channel.subscribe((status, [error]) async {
-      if (status == RealtimeSubscribeStatus.subscribed) {
-        if (isTyping) {
-          await channel.track({
-            'user_id': user.id,
-            'typing': true,
-          });
-        } else {
-          await channel.untrack();
-        }
-      }
-    });
+    // Subscribe to channel (returns void, not Future)
+    channel.subscribe();
 
     if (isTyping) {
       await channel.track({
         'user_id': user.id,
         'typing': true,
       });
+      debugPrint('User ${user.id} is typing in room $roomId');
     } else {
       await channel.untrack();
+      debugPrint('User ${user.id} stopped typing in room $roomId');
     }
   }
 
   @override
   Stream<String?> watchTypingStatus(String roomId) {
-    final channel = _supabase.channel('typing_$roomId');
-    final controller = StreamController<String?>();
+    final controller = StreamController<String?>.broadcast();
     final myId = _supabase.auth.currentUser?.id;
+    final channel = _supabase.channel('typing_$roomId');
 
     channel.onPresenceSync((payload) {
+      debugPrint('Typing sync for room $roomId');
       final dynamic state = channel.presenceState();
-      bool anyoneTyping = false;
       String? typingUserId;
 
       final presences = <dynamic>[];
@@ -347,19 +339,37 @@ class SupabaseChatRepository implements ChatRepository {
         presences.addAll(state);
       }
 
+      debugPrint('Typing presences count: ${presences.length}');
+
       for (final presence in presences) {
-        final pMap = (presence as dynamic).payload as Map<String, dynamic>?;
+        Map<String, dynamic>? pMap;
+        try {
+          if (presence is Map) {
+            pMap = Map<String, dynamic>.from(presence);
+          } else {
+            pMap = (presence as dynamic).payload as Map<String, dynamic>?;
+          }
+        } catch (_) {}
+
         if (pMap != null && pMap['user_id'] != myId && pMap['typing'] == true) {
-          anyoneTyping = true;
           typingUserId = pMap['user_id'] as String?;
+          debugPrint('User $typingUserId is typing');
           break;
         }
       }
 
       if (!controller.isClosed) {
-        controller.add(anyoneTyping ? typingUserId : null);
+        controller.add(typingUserId);
       }
-    }).subscribe();
+    });
+
+    // Subscribe to channel
+    channel.subscribe((status, [error]) {
+      debugPrint('Typing channel subscription status: $status');
+      if (error != null) {
+        debugPrint('Typing channel error: $error');
+      }
+    });
 
     return controller.stream;
   }
@@ -371,6 +381,7 @@ class SupabaseChatRepository implements ChatRepository {
 
     if (_presenceChannel == null) {
       _presenceChannel = _supabase.channel('global_presence');
+      // Subscribe to channel (returns void, not Future)
       _presenceChannel!.subscribe();
     }
 
@@ -380,17 +391,22 @@ class SupabaseChatRepository implements ChatRepository {
         'online': true,
         'last_seen': DateTime.now().toIso8601String(),
       });
+      debugPrint('Online status set to true for user: ${user.id}');
     } else {
       await _presenceChannel!.untrack();
+      debugPrint('Online status set to false for user: ${user.id}');
     }
   }
 
   @override
   Stream<bool> watchUserOnlineStatus(String userId) {
-    final controller = StreamController<bool>();
+    final controller = StreamController<bool>.broadcast();
+
+    // Use the SAME global presence channel
     final channel = _supabase.channel('global_presence');
 
     channel.onPresenceSync((payload) {
+      debugPrint('Presence sync for user $userId');
       final dynamic state = channel.presenceState();
       bool isOnline = false;
 
@@ -402,6 +418,8 @@ class SupabaseChatRepository implements ChatRepository {
       } else if (state is List) {
         presences.addAll(state);
       }
+
+      debugPrint('Total presences: ${presences.length}');
 
       for (final presence in presences) {
         Map<String, dynamic>? data;
@@ -417,16 +435,27 @@ class SupabaseChatRepository implements ChatRepository {
           }
         }
 
-        if (data != null &&
-            data['user_id'] == userId &&
-            data['online'] == true) {
-          isOnline = true;
-          break;
+        if (data != null) {
+          debugPrint(
+              'Checking presence: user_id=${data['user_id']}, online=${data['online']}');
+          if (data['user_id'] == userId && data['online'] == true) {
+            isOnline = true;
+            break;
+          }
         }
       }
 
+      debugPrint('User $userId online status: $isOnline');
       if (!controller.isClosed) controller.add(isOnline);
-    }).subscribe();
+    });
+
+    // Subscribe to the channel
+    channel.subscribe((status, [error]) {
+      debugPrint('Presence channel subscription status: $status');
+      if (error != null) {
+        debugPrint('Presence channel error: $error');
+      }
+    });
 
     return controller.stream;
   }

@@ -872,12 +872,37 @@ class _ChatListItem extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 4),
-              Text(
-                room.lastMessage ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(color: GossipColors.textDim, fontSize: 13),
+              StreamBuilder<String?>(
+                stream: sl<ChatRepository>().watchTypingStatus(room.id),
+                builder: (context, snapshot) {
+                  final typingUserId = snapshot.data;
+                  final isTyping = typingUserId != null;
+
+                  if (isTyping) {
+                    return Row(
+                      children: [
+                        _TypingDots(),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'typing...',
+                          style: TextStyle(
+                            color: GossipColors.primary,
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
+                  return Text(
+                    room.lastMessage ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: GossipColors.textDim, fontSize: 13),
+                  );
+                },
               ),
             ],
           ),
@@ -899,6 +924,41 @@ class _ChatListItem extends StatelessWidget {
             ),
           ).animate().scale(duration: 300.ms),
       ],
+    );
+  }
+}
+class _TypingDots extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(
+        3,
+        (i) => Container(
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          width: 4,
+          height: 4,
+          decoration: const BoxDecoration(
+            color: GossipColors.primary,
+            shape: BoxShape.circle,
+          ),
+        )
+            .animate(onPlay: (c) => c.repeat())
+            .moveY(
+              duration: 300.ms,
+              delay: (i * 150).ms,
+              begin: 0,
+              end: -4,
+              curve: Curves.easeInOut,
+            )
+            .then()
+            .moveY(
+              duration: 300.ms,
+              begin: -4,
+              end: 0,
+              curve: Curves.easeInOut,
+            ),
+      ),
     );
   }
 }

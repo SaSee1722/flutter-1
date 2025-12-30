@@ -51,6 +51,12 @@ class WebRTCService {
         });
       }
 
+      // CRITICAL: Ensure audio tracks are enabled
+      _localStream?.getAudioTracks().forEach((track) {
+        track.enabled = true;
+        debugPrint('Audio track enabled: ${track.id}');
+      });
+
       // Ensure audio is routed correctly (Mobile only)
       if (!kIsWeb &&
           (defaultTargetPlatform == TargetPlatform.android ||
@@ -109,6 +115,11 @@ class WebRTCService {
 
     for (var track in _localStream!.getTracks()) {
       _peerConnection!.addTrack(track, _localStream!);
+      // Ensure audio tracks are enabled
+      if (track.kind == 'audio') {
+        track.enabled = true;
+        debugPrint('Audio track enabled in createCall: ${track.id}');
+      }
     }
 
     RTCSessionDescription offer = await _peerConnection!.createOffer();
@@ -149,6 +160,11 @@ class WebRTCService {
 
     for (var track in _localStream!.getTracks()) {
       _peerConnection!.addTrack(track, _localStream!);
+      // Ensure audio tracks are enabled
+      if (track.kind == 'audio') {
+        track.enabled = true;
+        debugPrint('Audio track enabled in joinCall: ${track.id}');
+      }
     }
 
     await _peerConnection!.setRemoteDescription(offer);

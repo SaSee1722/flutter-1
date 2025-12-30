@@ -672,11 +672,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(
             children: [
               _SettingsToggle(
-                  icon: Icons.notifications_none_rounded,
-                  label: _t('notifications'),
-                  value: true,
-                  onChanged: (v) {}),
-              _SettingsToggle(
                   icon: _isPublic
                       ? Icons.visibility_rounded
                       : Icons.visibility_off_rounded,
