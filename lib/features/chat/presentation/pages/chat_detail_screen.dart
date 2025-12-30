@@ -30,7 +30,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:video_player/video_player.dart';
 import 'package:gossip/shared/utils/toast_utils.dart';
 import 'package:gossip/features/chat/presentation/widgets/group_settings_sheet.dart';
-
+import 'package:gossip/core/notifications/notification_service.dart';
 import 'package:gossip/core/notifications/notification_sound_helper.dart';
 import 'package:gossip/core/utils/date_formatter.dart';
 
@@ -109,6 +109,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
 
     // Mark as read immediately on entry
     sl<ChatRepository>().markAsRead(widget.roomId);
+
+    // Clear unread notification count
+    NotificationService.clearUnreadCount(widget.roomId);
 
     // Mark as read whenever the messages are updated and not loading
     context.read<ChatBloc>().stream.listen((state) {

@@ -6,6 +6,7 @@ import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:gossip/core/notifications/notification_sound_helper.dart';
 import 'package:uuid/uuid.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Top-level background handler required by FCM
 @pragma('vm:entry-point')
@@ -191,12 +192,19 @@ class NotificationService {
     final chatId = data['chatId'] as String;
     final senderName = data['senderName'] as String? ?? 'Gossip';
 
+    // Get unread count for this chat
+    final prefs = await SharedPreferences.getInstance();
+    final unreadKey = 'unread_$chatId';
+    final currentCount = prefs.getInt(unreadKey) ?? 0;
+    final newCount = currentCount + 1;
+    await prefs.setInt(unreadKey, newCount);
+
     // CUSTOM SOUND LOGIC
     final String? customSoundPath =
         await NotificationSoundHelper.getSoundPath(chatId: chatId);
 
     final androidDetails = AndroidNotificationDetails(
-      'chat_messages', // Use consistent channel ID
+      'chat_messages',
       'Chat Messages',
       channelDescription: 'Notifications for new gossip messages',
       importance: Importance.max,
@@ -213,6 +221,7 @@ class NotificationService {
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
+      badgeNumber: newCount,
     );
 
     final details =
@@ -220,8 +229,8 @@ class NotificationService {
 
     await _localNotifications.show(
       chatId.hashCode,
-      'New Gossip!',
-      'You have a message from $senderName',
+      senderName,
+      newCount == 1 ? '1 new message' : '$newCount new messages',
       details,
       payload: chatId,
     );
@@ -236,6 +245,8 @@ class NotificationService {
       channelDescription: 'Notifications for new friend requests',
       importance: Importance.high,
       priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
     );
 
     const iosDetails = DarwinNotificationDetails(
@@ -250,7 +261,7 @@ class NotificationService {
     await _localNotifications.show(
       DateTime.now().millisecond,
       'New Friend Request',
-      '$senderName wants to be your friend!',
+      '$senderName wants to be your friend',
       details,
       payload: 'friend_request',
     );
@@ -335,5 +346,11 @@ class NotificationService {
         'callType': callType,
       });
     }
+  }
+
+  /// Clear unread count for a chat (call when user opens the chat)
+  static Future<void> clearUnreadCount(String chatId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('unread_$chatId');
   }
 }

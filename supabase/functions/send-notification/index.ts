@@ -49,25 +49,42 @@ async function handleChatMessage(supabase: any, record: any, accessToken: string
     const senderId = record.user_id
     const roomId = record.room_id
 
-    const { data: senderProfile } = await supabase.from('profiles').select('username').eq('id', senderId).single()
+    const { data: senderProfile } = await supabase.from('profiles').select('username, avatar_url').eq('id', senderId).single()
     const senderName = senderProfile?.username ?? 'Gossip'
+    const senderAvatar = senderProfile?.avatar_url
 
     let receiverIds: string[] = []
+
+    // First check if it's a group chat
     const { data: members } = await supabase.from('group_members').select('user_id').eq('room_id', roomId)
 
     if (members && members.length > 0) {
+        // Group chat - send to all members except sender
         receiverIds = members.map((m: any) => m.user_id).filter((id: string) => id !== senderId)
     } else {
-        const { data: friendRoom } = await supabase.from('friend_requests').select('sender_id, receiver_id').eq('id', roomId).single()
-        if (friendRoom) {
-            receiverIds = [friendRoom.sender_id === senderId ? friendRoom.receiver_id : friendRoom.sender_id]
+        // 1-to-1 chat - find the other user from room_members
+        const { data: roomMembers } = await supabase
+            .from('room_members')
+            .select('user_id')
+            .eq('room_id', roomId)
+
+        if (roomMembers && roomMembers.length > 0) {
+            receiverIds = roomMembers
+                .map((m: any) => m.user_id)
+                .filter((id: string) => id !== senderId)
         }
+    }
+
+    if (receiverIds.length === 0) {
+        return new Response('No receivers found', { status: 200 })
     }
 
     return await sendToUsers(supabase, receiverIds, {
         type: 'chat',
         chatId: roomId,
         senderName: senderName,
+        senderAvatar: senderAvatar || '',
+        messagePreview: 'New message',
     }, 'high', accessToken, projectId)
 }
 
