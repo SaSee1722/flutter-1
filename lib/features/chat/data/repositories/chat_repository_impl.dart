@@ -9,6 +9,7 @@ import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
 class SupabaseChatRepository implements ChatRepository {
   final SupabaseClient _supabase;
   RealtimeChannel? _presenceChannel;
+  final Map<String, RealtimeChannel> _typingChannels = {};
 
   SupabaseChatRepository(this._supabase);
 
@@ -302,20 +303,41 @@ class SupabaseChatRepository implements ChatRepository {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
 
-    final channel = _supabase.channel('typing_$roomId');
+    try {
+      if (!_typingChannels.containsKey(roomId)) {
+        final channel = _supabase.channel('typing_$roomId');
+        final completer = Completer<void>();
 
-    // Subscribe to channel (returns void, not Future)
-    channel.subscribe();
+        channel.subscribe((status, [error]) {
+          debugPrint('Typing channel $roomId status: $status');
+          if (status == RealtimeSubscribeStatus.subscribed) {
+            if (!completer.isCompleted) completer.complete();
+          } else if (error != null) {
+            if (!completer.isCompleted) completer.completeError(error);
+          }
+        });
 
-    if (isTyping) {
-      await channel.track({
-        'user_id': user.id,
-        'typing': true,
-      });
-      debugPrint('User ${user.id} is typing in room $roomId');
-    } else {
-      await channel.untrack();
-      debugPrint('User ${user.id} stopped typing in room $roomId');
+        await completer.future.timeout(
+          const Duration(seconds: 5),
+          onTimeout: () =>
+              debugPrint('Typing channel $roomId subscription timeout'),
+        );
+        _typingChannels[roomId] = channel;
+      }
+
+      final channel = _typingChannels[roomId]!;
+      if (isTyping) {
+        await channel.track({
+          'user_id': user.id,
+          'typing': true,
+        });
+        debugPrint('User ${user.id} is typing in room $roomId');
+      } else {
+        await channel.untrack();
+        debugPrint('User ${user.id} stopped typing in room $roomId');
+      }
+    } catch (e) {
+      debugPrint('Error setting typing status: $e');
     }
   }
 
@@ -385,21 +407,20 @@ class SupabaseChatRepository implements ChatRepository {
 
         final completer = Completer<void>();
         _presenceChannel!.subscribe((status, [error]) {
-          debugPrint('Presence channel subscription status: $status');
-          if (error != null) {
-            debugPrint('Presence channel subscription error: $error');
-            if (!completer.isCompleted) completer.completeError(error);
-          } else if (status == RealtimeSubscribeStatus.subscribed) {
+          debugPrint('Presence channel status: $status');
+          if (status == RealtimeSubscribeStatus.subscribed) {
             if (!completer.isCompleted) completer.complete();
+          } else if (error != null) {
+            if (!completer.isCompleted) completer.completeError(error);
           }
         });
 
-        await completer.future.timeout(
-          const Duration(seconds: 10),
-          onTimeout: () {
-            debugPrint('Presence channel subscription timeout');
-          },
-        );
+        await completer.future
+            .timeout(
+              const Duration(seconds: 10),
+              onTimeout: () => debugPrint('Presence channel timeout'),
+            )
+            .catchError((e) => debugPrint('Presence subscription error: $e'));
       }
 
       if (isOnline) {
@@ -424,8 +445,6 @@ class SupabaseChatRepository implements ChatRepository {
 
     // Use the SAME global presence channel
     final channel = _supabase.channel('global_presence');
-
-    bool hasEmittedInitial = false;
 
     channel.onPresenceSync((payload) {
       debugPrint('Presence sync for user $userId');
@@ -473,21 +492,15 @@ class SupabaseChatRepository implements ChatRepository {
       debugPrint('User $userId online status: $isOnline');
       if (!controller.isClosed) {
         controller.add(isOnline);
-        hasEmittedInitial = true;
       }
     });
 
     // Subscribe to the channel with proper error handling
     channel.subscribe((status, [error]) {
-      debugPrint('Presence channel subscription status for $userId: $status');
-      if (error != null) {
-        debugPrint('Presence channel error: $error');
-        if (!controller.isClosed && !hasEmittedInitial) {
-          controller.add(false); // Default to offline on error
-        }
-      } else if (status == RealtimeSubscribeStatus.subscribed) {
-        debugPrint('Successfully subscribed to presence channel for $userId');
-        // Initial state will be emitted via onPresenceSync
+      debugPrint('Presence stream status for $userId: $status');
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        // Force a sync check immediately after subscription
+        debugPrint('Subscribed to presence for $userId, tracking sync...');
       }
     });
 

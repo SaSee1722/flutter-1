@@ -25,6 +25,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     final user = _authRepository.currentUser;
     if (user != null) {
       _chatRepository.setOnlineStatus(true);
+      di.sl<NotificationService>().uploadTokenToSupabase();
       emit(AuthAuthenticated(user));
     } else {
       emit(AuthUnauthenticated());

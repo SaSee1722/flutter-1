@@ -218,11 +218,20 @@ class CallBloc extends Bloc<CallEvent, CallState> {
 
   Future<void> _onAnswerCall(AnswerCall event, Emitter<CallState> emit) async {
     final currentState = state;
-    if (currentState is! CallRinging) return;
+
+    // Allow answering even if state is not Ringing (e.g., app launched from background)
+    bool actuallyVideo = true;
+    String callerName = "Incoming Call";
+    String? callerAvatar;
+
+    if (currentState is CallRinging) {
+      actuallyVideo = currentState.isVideo;
+      callerName = currentState.callerName;
+      callerAvatar = currentState.callerAvatar;
+    }
 
     try {
-      final actuallyVideo =
-          await _webRTCService.initLocalStream(currentState.isVideo);
+      actuallyVideo = await _webRTCService.initLocalStream(actuallyVideo);
       localRenderer.srcObject = _webRTCService.localStream;
 
       final callData = await _callRepository.onCallUpdate(event.callId).first;
@@ -231,6 +240,13 @@ class CallBloc extends Bloc<CallEvent, CallState> {
         offerMap['sdp'],
         offerMap['type'],
       );
+
+      // Re-populate info from data if state was not local Ringing
+      if (currentState is! CallRinging) {
+        callerName = callData['caller_name'] ?? callerName;
+        callerAvatar = callData['caller_avatar'] ?? callerAvatar;
+        actuallyVideo = callData['is_video'] ?? actuallyVideo;
+      }
 
       await _webRTCService.joinCall(event.callId, offer);
       _listenToIceCandidates(event.callId);
@@ -248,8 +264,8 @@ class CallBloc extends Bloc<CallEvent, CallState> {
       }
       emit(CallActive(
         callId: event.callId,
-        remoteName: currentState.callerName,
-        remoteAvatar: currentState.callerAvatar,
+        remoteName: callerName,
+        remoteAvatar: callerAvatar,
         localRenderer: localRenderer,
         remoteRenderers: {'default': remoteRenderer},
         isVideo: actuallyVideo,

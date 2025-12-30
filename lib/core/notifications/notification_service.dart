@@ -293,24 +293,24 @@ class NotificationService {
       android: const AndroidParams(
         isCustomNotification: true,
         isShowLogo: false,
-        ringtonePath: 'system_ringtone_default', // Use system default ringtone
+        ringtonePath: null, // Use default
         backgroundColor: '#075E54',
         backgroundUrl: 'https://i.pravatar.cc/500',
         actionColor: '#4CAF50',
       ),
-      ios: const IOSParams(
+      ios: IOSParams(
         iconName: 'Gossip',
         handleType: 'generic',
         supportsVideo: true,
         maximumCallGroups: 2,
         maximumCallsPerCallGroup: 1,
-        audioSessionMode: 'default',
+        audioSessionMode: isVideo ? 'videoChat' : 'voiceChat',
         audioSessionActive: true,
         supportsDTMF: true,
         supportsHolding: true,
         supportsGrouping: false,
         supportsUngrouping: false,
-        ringtonePath: 'system_ringtone_default', // Use system default ringtone
+        ringtonePath: null, // Use default
       ),
     );
 

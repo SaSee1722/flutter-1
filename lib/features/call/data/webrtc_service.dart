@@ -112,6 +112,7 @@ class WebRTCService {
 
   String? _currentCallId;
   final List<RTCIceCandidate> _earlyCandidates = [];
+  final List<RTCIceCandidate> _remoteEarlyCandidates = [];
 
   Future<String> createCall({
     String? receiverId,
@@ -265,15 +266,26 @@ class WebRTCService {
       final remoteDesc = await _peerConnection!.getRemoteDescription();
       if (remoteDesc != null) {
         await _peerConnection!.addCandidate(candidate);
+        debugPrint('[WebRTC] ICE Candidate added');
       } else {
+        _remoteEarlyCandidates.add(candidate);
         debugPrint(
-            'ICE Candidate received but remote description is null, skipping...');
+            '[WebRTC] ICE Candidate buffered (Remote description not yet set)');
       }
     }
   }
 
   Future<void> setRemoteDescription(RTCSessionDescription answer) async {
-    await _peerConnection?.setRemoteDescription(answer);
+    if (_peerConnection == null) return;
+    await _peerConnection!.setRemoteDescription(answer);
+    debugPrint(
+        '[WebRTC] Remote description set, processing buffered candidates');
+
+    // Process buffered candidates
+    for (var candidate in _remoteEarlyCandidates) {
+      await _peerConnection!.addCandidate(candidate);
+    }
+    _remoteEarlyCandidates.clear();
   }
 
   Future<void> toggleVideo(bool enabled) async {
