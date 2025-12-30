@@ -120,11 +120,14 @@ class WebRTCService {
     String? callerName,
     String? callerAvatar,
   }) async {
+    debugPrint('[WebRTC] Creating call (isVideo: $isVideo)');
     _earlyCandidates.clear();
     _peerConnection = await createPeerConnection(_iceServers);
     _currentCallId = null;
 
+    // Set up ICE candidate handler
     _peerConnection!.onIceCandidate = (candidate) {
+      debugPrint('[WebRTC] ICE candidate generated');
       if (_currentCallId != null) {
         _callRepository.addIceCandidate(_currentCallId!, candidate, true);
       } else {
@@ -132,24 +135,44 @@ class WebRTCService {
       }
     };
 
+    // Set up remote track handler
     _peerConnection!.onTrack = (event) {
+      debugPrint('[WebRTC] Remote track received: ${event.track.kind}');
       if (event.streams.isNotEmpty) {
         _remoteStream = event.streams[0];
+        debugPrint(
+            '[WebRTC] Remote stream set with ${_remoteStream!.getTracks().length} tracks');
         onRemoteStream?.call(_remoteStream!);
       }
     };
 
+    // Set up connection state listeners
+    _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
+      debugPrint('[WebRTC] Peer connection state: $state');
+      onStatusUpdate?.call('Connection: $state');
+    };
+
+    _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
+      debugPrint('[WebRTC] ICE connection state: $state');
+    };
+
+    // CRITICAL: Add tracks BEFORE creating offer
+    debugPrint(
+        '[WebRTC] Adding ${_localStream!.getTracks().length} local tracks');
     for (var track in _localStream!.getTracks()) {
-      _peerConnection!.addTrack(track, _localStream!);
-      // Ensure audio tracks are enabled
-      if (track.kind == 'audio') {
-        track.enabled = true;
-        debugPrint('Audio track enabled in createCall: ${track.id}');
-      }
+      await _peerConnection!.addTrack(track, _localStream!);
+      debugPrint(
+          '[WebRTC] Added ${track.kind} track: ${track.id}, enabled: ${track.enabled}');
+
+      // Ensure all tracks are enabled
+      track.enabled = true;
     }
 
+    // Create offer AFTER adding tracks
+    debugPrint('[WebRTC] Creating offer...');
     RTCSessionDescription offer = await _peerConnection!.createOffer();
     await _peerConnection!.setLocalDescription(offer);
+    debugPrint('[WebRTC] Offer created and set as local description');
 
     _currentCallId = await _callRepository.makeCall(
       receiverId: receiverId,
@@ -159,6 +182,7 @@ class WebRTCService {
       callerName: callerName,
       callerAvatar: callerAvatar,
     );
+    debugPrint('[WebRTC] Call created with ID: $_currentCallId');
 
     // Send buffered candidates
     for (var candidate in _earlyCandidates) {
@@ -170,33 +194,62 @@ class WebRTCService {
   }
 
   Future<void> joinCall(String callId, RTCSessionDescription offer) async {
+    debugPrint('[WebRTC] Joining call: $callId');
     _currentCallId = callId;
     _peerConnection = await createPeerConnection(_iceServers);
 
+    // Set up ICE candidate handler
     _peerConnection!.onIceCandidate = (candidate) {
+      debugPrint('[WebRTC] ICE candidate generated (answerer)');
       _callRepository.addIceCandidate(callId, candidate, false);
     };
 
+    // Set up remote track handler
     _peerConnection!.onTrack = (event) {
+      debugPrint('[WebRTC] Remote track received: ${event.track.kind}');
       if (event.streams.isNotEmpty) {
         _remoteStream = event.streams[0];
+        debugPrint(
+            '[WebRTC] Remote stream set with ${_remoteStream!.getTracks().length} tracks');
         onRemoteStream?.call(_remoteStream!);
       }
     };
 
+    // Set up connection state listeners
+    _peerConnection!.onConnectionState = (RTCPeerConnectionState state) {
+      debugPrint('[WebRTC] Peer connection state: $state');
+      onStatusUpdate?.call('Connection: $state');
+    };
+
+    _peerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
+      debugPrint('[WebRTC] ICE connection state: $state');
+    };
+
+    // CRITICAL: Add tracks BEFORE setting remote description
+    debugPrint(
+        '[WebRTC] Adding ${_localStream!.getTracks().length} local tracks');
     for (var track in _localStream!.getTracks()) {
-      _peerConnection!.addTrack(track, _localStream!);
-      // Ensure audio tracks are enabled
-      if (track.kind == 'audio') {
-        track.enabled = true;
-        debugPrint('Audio track enabled in joinCall: ${track.id}');
-      }
+      await _peerConnection!.addTrack(track, _localStream!);
+      debugPrint(
+          '[WebRTC] Added ${track.kind} track: ${track.id}, enabled: ${track.enabled}');
+
+      // Ensure all tracks are enabled
+      track.enabled = true;
     }
 
+    // Set remote description (the offer)
+    debugPrint('[WebRTC] Setting remote description (offer)');
     await _peerConnection!.setRemoteDescription(offer);
+
+    // Create answer
+    debugPrint('[WebRTC] Creating answer...');
     RTCSessionDescription answer = await _peerConnection!.createAnswer();
     await _peerConnection!.setLocalDescription(answer);
+    debugPrint('[WebRTC] Answer created and set as local description');
+
+    // Send answer to caller
     await _callRepository.answerCall(callId, answer);
+    debugPrint('[WebRTC] Answer sent to caller');
   }
 
   Future<void> addCandidate(RTCIceCandidate candidate) async {
