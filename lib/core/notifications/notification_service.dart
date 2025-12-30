@@ -86,6 +86,7 @@ class NotificationService {
             'callId': event.body['id'],
             'callerName': event.body['nameCaller'],
             'callType': event.body['type'] == 1 ? 'video' : 'audio',
+            'autoAnswer': true,
           });
           break;
         case Event.actionCallDecline:
@@ -339,11 +340,13 @@ class NotificationService {
       final callerName = data['callerName'];
       final callerAvatar = data['callerAvatar'];
       final callType = data['callType'];
+      final autoAnswer = data['autoAnswer'] == true;
       navigatorKey.currentState?.pushNamed('/incoming_call', arguments: {
         'callId': callId,
         'callerName': callerName,
         'callerAvatar': callerAvatar,
         'callType': callType,
+        'autoAnswer': autoAnswer,
       });
     }
   }

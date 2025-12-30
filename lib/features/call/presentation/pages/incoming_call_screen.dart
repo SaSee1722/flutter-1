@@ -6,10 +6,25 @@ import '../bloc/call_bloc.dart';
 import '../bloc/call_event.dart';
 import '../bloc/call_state.dart';
 
-class IncomingCallScreen extends StatelessWidget {
+class IncomingCallScreen extends StatefulWidget {
   final CallRinging state;
 
   const IncomingCallScreen({super.key, required this.state});
+
+  @override
+  State<IncomingCallScreen> createState() => _IncomingCallScreenState();
+}
+
+class _IncomingCallScreenState extends State<IncomingCallScreen> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.state.isIncoming && widget.state.autoAnswer) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<CallBloc>().add(AnswerCall(widget.state.callId));
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -72,13 +87,13 @@ class IncomingCallScreen extends StatelessWidget {
                       CircleAvatar(
                         radius: 70,
                         backgroundColor: GossipColors.cardBackground,
-                        backgroundImage: state.callerAvatar != null
-                            ? NetworkImage(state.callerAvatar!)
+                        backgroundImage: widget.state.callerAvatar != null
+                            ? NetworkImage(widget.state.callerAvatar!)
                             : null,
-                        child: state.callerAvatar == null
+                        child: widget.state.callerAvatar == null
                             ? Text(
-                                (state.callerName.isNotEmpty
-                                        ? state.callerName[0]
+                                (widget.state.callerName.isNotEmpty
+                                        ? widget.state.callerName[0]
                                         : "?")
                                     .toUpperCase(),
                                 style: const TextStyle(
@@ -93,7 +108,7 @@ class IncomingCallScreen extends StatelessWidget {
                 const SizedBox(height: 32),
 
                 Text(
-                  state.callerName,
+                  widget.state.callerName,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 32,
@@ -104,8 +119,8 @@ class IncomingCallScreen extends StatelessWidget {
                 const SizedBox(height: 8),
 
                 Text(
-                  state.isIncoming
-                      ? "GOSSIP ${state.isVideo ? 'VIDEO' : 'AUDIO'} CALL"
+                  widget.state.isIncoming
+                      ? "GOSSIP ${widget.state.isVideo ? 'VIDEO' : 'AUDIO'} CALL"
                       : "CALLING...",
                   style: const TextStyle(
                     color: GossipColors.primary,
@@ -122,7 +137,7 @@ class IncomingCallScreen extends StatelessWidget {
                 Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 48, vertical: 64),
-                  child: state.isIncoming
+                  child: widget.state.isIncoming
                       ? Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -134,19 +149,21 @@ class IncomingCallScreen extends StatelessWidget {
                               onPressed: () {
                                 context
                                     .read<CallBloc>()
-                                    .add(RejectCall(state.callId));
+                                    .add(RejectCall(widget.state.callId));
                               },
                             ),
 
                             // Accept
                             _CallButton(
-                              icon: state.isVideo ? Icons.videocam : Icons.call,
+                              icon: widget.state.isVideo
+                                  ? Icons.videocam
+                                  : Icons.call,
                               color: Colors.green,
                               label: "Accept",
                               onPressed: () {
                                 context
                                     .read<CallBloc>()
-                                    .add(AnswerCall(state.callId));
+                                    .add(AnswerCall(widget.state.callId));
                               },
                             ),
                           ],
@@ -160,7 +177,7 @@ class IncomingCallScreen extends StatelessWidget {
                             onPressed: () {
                               context
                                   .read<CallBloc>()
-                                  .add(EndCall(state.callId));
+                                  .add(EndCall(widget.state.callId));
                             },
                           ),
                         ),

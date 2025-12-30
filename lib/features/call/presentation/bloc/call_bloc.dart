@@ -212,12 +212,14 @@ class CallBloc extends Bloc<CallEvent, CallState> {
       isIncoming: true,
     ));
     _startTimeoutTimer();
-    // Use system ringtone via CallKit usually, but if custom in-app handling needed:
-    // _soundService.playRinging();
+    // Play ringing if in foreground
+    _soundService.playRinging();
   }
 
   Future<void> _onAnswerCall(AnswerCall event, Emitter<CallState> emit) async {
     final currentState = state;
+
+    _soundService.stop(); // STOP RINGING IMMEDIATELY
 
     // Allow answering even if state is not Ringing (e.g., app launched from background)
     bool actuallyVideo = true;
@@ -282,6 +284,7 @@ class CallBloc extends Bloc<CallEvent, CallState> {
 
   Future<void> _onRejectCall(RejectCall event, Emitter<CallState> emit) async {
     _stopTimeoutTimer();
+    _soundService.stop();
     await _callRepository.rejectCall(event.callId);
     _cleanup();
     emit(CallIdle());

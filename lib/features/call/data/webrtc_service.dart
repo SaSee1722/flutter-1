@@ -45,25 +45,14 @@ class WebRTCService {
         'echoCancellation': true,
         'noiseSuppression': true,
         'autoGainControl': true,
-        'googEchoCancellation': true,
-        'googNoiseSuppression': true,
-        'googAutoGainControl': true,
-        'googHighpassFilter': true,
       },
-      'video': true,
+      'video': isVideo,
     };
 
     try {
       _localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // If the user specifically wanted audio only, we disable the video track for now
-      if (!isVideo) {
-        _localStream?.getVideoTracks().forEach((track) {
-          track.enabled = false;
-        });
-      }
-
-      // CRITICAL: Ensure audio tracks are enabled
+      // CRITICAL: Ensure audio tracks are enabled and video is set correctly
       _localStream?.getAudioTracks().forEach((track) {
         track.enabled = true;
         debugPrint(

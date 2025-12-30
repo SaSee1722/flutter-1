@@ -15,6 +15,7 @@ class CallRinging extends CallState {
   final String? callerAvatar;
   final bool isVideo;
   final bool isIncoming;
+  final bool autoAnswer;
 
   const CallRinging({
     required this.callId,
@@ -22,11 +23,12 @@ class CallRinging extends CallState {
     this.callerAvatar,
     required this.isVideo,
     required this.isIncoming,
+    this.autoAnswer = false,
   });
 
   @override
   List<Object?> get props =>
-      [callId, callerName, callerAvatar, isVideo, isIncoming];
+      [callId, callerName, callerAvatar, isVideo, isIncoming, autoAnswer];
 }
 
 class CallActive extends CallState {

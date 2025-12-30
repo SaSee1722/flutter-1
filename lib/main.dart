@@ -83,6 +83,7 @@ class GossipApp extends StatelessWidget {
                   callerAvatar: args['callerAvatar'],
                   isVideo: args['callType'] == 'video',
                   isIncoming: true,
+                  autoAnswer: args['autoAnswer'] == true,
                 ),
               ),
             );
