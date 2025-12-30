@@ -38,14 +38,9 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Enable code shrinking and obfuscation
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            // Disable minification to avoid missing class errors
+            isMinifyEnabled = false
+            isShrinkResources = false
             // Signing with the debug keys for now
             signingConfig = signingConfigs.getByName("debug")
         }
