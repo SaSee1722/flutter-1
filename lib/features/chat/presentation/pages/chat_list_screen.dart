@@ -331,6 +331,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             return Row(
                               children: [
                                 _VibeItem(
+                                  userId: userId,
                                   label: firstVibe.username ?? 'User',
                                   imageUrl: (firstVibe.mediaUrl.isNotEmpty)
                                       ? firstVibe.mediaUrl
@@ -451,6 +452,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                           roomId: room.id,
                                           chatName: room.name,
                                           currentUserGender: _myGender,
+                                          isGroup: room.isGroup,
+                                          otherUserId: room.otherUserId,
                                         ),
                                       ),
                                     );
@@ -470,6 +473,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 chatName: room.name,
                                 avatarUrl: room.avatarUrl,
                                 currentUserGender: _myGender,
+                                isGroup: room.isGroup,
+                                otherUserId: room.otherUserId,
                               ),
                             ),
                           );
@@ -667,19 +672,21 @@ class _HeaderDoodle extends StatelessWidget {
 
 class _VibeItem extends StatelessWidget {
   final String label;
+  final String? imageUrl;
+  final String? userId;
+  final VoidCallback onTap;
+  final VoidCallback? onAddTap;
   final bool isYours;
   final bool isViewed;
-  final String? imageUrl;
-  final VoidCallback? onTap;
-  final VoidCallback? onAddTap;
 
   const _VibeItem({
     required this.label,
+    required this.onTap,
+    this.imageUrl,
+    this.userId,
+    this.onAddTap,
     this.isYours = false,
     this.isViewed = false,
-    this.imageUrl,
-    this.onTap,
-    this.onAddTap,
   });
 
   @override
@@ -759,6 +766,38 @@ class _VibeItem extends StatelessWidget {
                             color: Colors.white, size: 14),
                       ),
                     ),
+                  )
+                else if (userId != null)
+                  StreamBuilder<bool>(
+                    stream: sl<ChatRepository>().watchUserOnlineStatus(userId!),
+                    builder: (context, snapshot) {
+                      final isOnline = snapshot.data ?? false;
+                      if (!isOnline) return const SizedBox();
+                      return Positioned(
+                        bottom: 4,
+                        right: 4,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: GossipColors.background,
+                              width: 2.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    Colors.greenAccent.withValues(alpha: 0.3),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
               ],
             ),
@@ -771,6 +810,22 @@ class _VibeItem extends StatelessWidget {
                 fontWeight: FontWeight.w500,
               ),
             ),
+            if (userId != null)
+              StreamBuilder<bool>(
+                stream: sl<ChatRepository>().watchUserOnlineStatus(userId!),
+                builder: (context, snapshot) {
+                  final isOnline = snapshot.data ?? false;
+                  if (!isOnline) return const SizedBox.shrink();
+                  return const Text(
+                    'Online',
+                    style: TextStyle(
+                      color: Colors.greenAccent,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ).animate().fadeIn();
+                },
+              ),
           ],
         ),
       ),

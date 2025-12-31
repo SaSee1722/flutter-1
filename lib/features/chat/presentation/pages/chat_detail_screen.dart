@@ -41,6 +41,7 @@ class ChatDetailScreen extends StatefulWidget {
   final String? avatarUrl;
   final String? currentUserGender;
   final bool isGroup;
+  final String? otherUserId;
 
   const ChatDetailScreen({
     super.key,
@@ -49,6 +50,7 @@ class ChatDetailScreen extends StatefulWidget {
     this.avatarUrl,
     this.currentUserGender,
     this.isGroup = false,
+    this.otherUserId,
   });
 
   @override
@@ -133,34 +135,38 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
       });
     } else {
       // For DMs, we need the other user's ID
-      try {
-        final res = await Supabase.instance.client
-            .from('room_members')
-            .select('user_id')
-            .eq('room_id', widget.roomId);
+      String? otherId = widget.otherUserId;
 
-        if ((res as List).isNotEmpty) {
-          final myId = Supabase.instance.client.auth.currentUser?.id;
-          final List members = res as List;
-          final otherMember = members.firstWhere(
-            (m) => m['user_id'] != myId,
-            orElse: () => null,
-          );
-          final otherId = otherMember?['user_id'];
+      if (otherId == null) {
+        try {
+          // Fallback if we don't have it passed in (e.g. from a deep link or notification)
+          // Use 'friend_requests' table as DMs are linked to them in this app's schema
+          final res = await Supabase.instance.client
+              .from('friend_requests')
+              .select('sender_id, receiver_id')
+              .eq('id', widget.roomId)
+              .maybeSingle();
 
-          if (mounted) setState(() => _otherUserId = otherId);
-
-          if (otherId != null) {
-            _presenceSubscription = sl<ChatRepository>()
-                .watchUserOnlineStatus(otherId)
-                .listen((isOnline) {
-              if (mounted) setState(() => _isOtherUserOnline = isOnline);
-            });
-            // Initial block check
-            await _checkBlockStatus();
+          if (res != null) {
+            final myId = Supabase.instance.client.auth.currentUser?.id;
+            otherId = res['sender_id'] == myId
+                ? res['receiver_id']
+                : res['sender_id'];
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
+
+      if (mounted) setState(() => _otherUserId = otherId);
+
+      if (otherId != null) {
+        _presenceSubscription = sl<ChatRepository>()
+            .watchUserOnlineStatus(otherId)
+            .listen((isOnline) {
+          if (mounted) setState(() => _isOtherUserOnline = isOnline);
+        });
+        // Initial block check
+        await _checkBlockStatus();
+      }
     }
   }
 
@@ -295,7 +301,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                           : null,
                     ),
                   ),
-                  if (!widget.isGroup)
+                  if (!widget.isGroup && _isOtherUserOnline)
                     Positioned(
                       bottom: 0,
                       right: 0,
@@ -303,14 +309,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                         width: 12,
                         height: 12,
                         decoration: BoxDecoration(
-                          color: _isOtherUserOnline
-                              ? Colors.greenAccent
-                              : Colors.transparent,
+                          color: Colors.greenAccent,
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: _isOtherUserOnline
-                                ? Colors.black
-                                : Colors.transparent,
+                            color: Colors.black,
                             width: 2,
                           ),
                         ),
@@ -357,14 +359,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                       ),
                     )
                   else if (_isOtherUserOnline)
-                    const Text(
-                      'ONLINE',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.greenAccent,
-                        letterSpacing: 1.5,
-                      ),
+                    Row(
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: Colors.greenAccent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'ONLINE',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.greenAccent,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ],
                     ),
                 ],
               ),
@@ -1061,7 +1076,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen>
                   ),
                 ],
               ),
-            ).animate().fadeIn().slideY(begin: 0.2, end: 0),
+            )
+                .animate(key: const ValueKey('pip_anim'))
+                .fadeIn()
+                .slideX(begin: 0.5, end: 0),
           Row(
             children: [
               Expanded(
@@ -1452,7 +1470,7 @@ class _MessageBubble extends StatefulWidget {
 class _MessageBubbleState extends State<_MessageBubble> {
   @override
   Widget build(BuildContext context) {
-    Color bubbleColor;
+    late final Color bubbleColor;
     final gender = widget.message.senderGender?.toLowerCase();
 
     if (gender == 'male') {
@@ -1460,15 +1478,17 @@ class _MessageBubbleState extends State<_MessageBubble> {
     } else if (gender == 'female') {
       bubbleColor = const Color(0xFFF4C2C2); // Baby Pink
     } else if (gender == 'others' || gender == 'other') {
-      bubbleColor = const Color(0xFFFFD700); // Golden
+      bubbleColor = const Color(0xFFFFE082); // Light Golden
     } else {
       bubbleColor = widget.isMe
           ? GossipColors.primary.withValues(alpha: 0.2)
           : GossipColors.cardBackground;
     }
 
-    final bool isSpecialColor =
-        gender == 'male' || gender == 'female' || gender == 'other';
+    final bool isSpecialColor = gender == 'male' ||
+        gender == 'female' ||
+        gender == 'other' ||
+        gender == 'others';
     final textColor = (isSpecialColor) ? Colors.black : Colors.white;
 
     return Dismissible(

@@ -70,6 +70,7 @@ class GossipApp extends StatelessWidget {
                 roomId: args['chatId'],
                 chatName: args['senderName'] ?? 'Gossip',
                 avatarUrl: args['senderAvatar'],
+                otherUserId: args['senderId'],
               ),
             );
           }

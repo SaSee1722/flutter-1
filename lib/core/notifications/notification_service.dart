@@ -309,10 +309,9 @@ class NotificationService {
       android: const AndroidParams(
         isCustomNotification: true,
         isShowLogo: false,
-        ringtonePath: null, // Use default
-        backgroundColor: '#075E54',
-        backgroundUrl: 'https://i.pravatar.cc/500',
-        actionColor: '#4CAF50',
+        ringtonePath: 'system_ringtone_default',
+        backgroundColor: '#111015',
+        actionColor: '#ffd700',
       ),
       ios: IOSParams(
         iconName: 'Gossip',

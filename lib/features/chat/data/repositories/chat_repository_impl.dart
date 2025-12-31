@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:gossip/features/chat/domain/entities/message.dart';
@@ -8,19 +9,22 @@ import 'package:gossip/features/chat/domain/repositories/chat_repository.dart';
 
 class SupabaseChatRepository implements ChatRepository {
   final SupabaseClient _supabase;
-  RealtimeChannel? _presenceChannel;
   final Map<String, RealtimeChannel> _typingChannels = {};
   final Map<String, bool> _typingCache = {};
 
-  // For centralized stream management to avoid memory leaks/log spam
   final Map<String, StreamController<bool>> _onlineControllers = {};
   final Map<String, StreamController<String?>> _typingControllers = {};
   final Map<String, StreamController<int>> _groupPresenceControllers = {};
+
+  RealtimeChannel? _globalPresenceChannel;
+  bool _isGlobalPresenceSubscribed = false;
 
   SupabaseChatRepository(this._supabase);
 
   @override
   User? get currentUser => _supabase.auth.currentUser;
+
+  final _refreshController = StreamController<void>.broadcast();
 
   @override
   Future<void> sendMessage(Message message) async {
@@ -28,11 +32,8 @@ class SupabaseChatRepository implements ChatRepository {
     _refreshController.add(null);
   }
 
-  final _refreshController = StreamController<void>.broadcast();
-
   @override
   Stream<List<Message>> getMessages(String roomId) {
-    // Store profiles in memory to avoid redundant fetches
     final Map<String, Map<String, dynamic>> profileCache = {};
 
     return _supabase
@@ -42,10 +43,8 @@ class SupabaseChatRepository implements ChatRepository {
         .order('created_at', ascending: false)
         .asyncMap((data) async {
           final List<Message> messages = [];
-
           for (var json in data) {
             final userId = json['user_id'];
-
             if (!profileCache.containsKey(userId)) {
               final profile = await _supabase
                   .from('profiles')
@@ -56,14 +55,12 @@ class SupabaseChatRepository implements ChatRepository {
                 profileCache[userId] = profile;
               }
             }
-
             final profile = profileCache[userId];
-            final message = Message.fromJson({
+            messages.add(Message.fromJson({
               ...json,
               'sender_name': profile?['username'],
               'sender_gender': profile?['gender'],
-            });
-            messages.add(message);
+            }));
           }
           return messages;
         });
@@ -73,10 +70,8 @@ class SupabaseChatRepository implements ChatRepository {
   Stream<List<ChatRoom>> getRooms() {
     final user = _supabase.auth.currentUser;
     if (user == null) return Stream.value([]);
-
     final controller = StreamController<List<ChatRoom>>();
 
-    // Combine friend_requests and messages triggers
     final friendsStream = _supabase
         .from('friend_requests')
         .stream(primaryKey: ['id']).map((data) => data
@@ -86,25 +81,17 @@ class SupabaseChatRepository implements ChatRepository {
                 item['status'] == 'accepted')
             .toList());
 
-    final messagesTrigger = _supabase
-        .from('messages')
-        .stream(primaryKey: ['id']); // Trigger on any message change
-
-    StreamSubscription? friendsSub;
-    StreamSubscription? messagesSub;
+    final messagesTrigger =
+        _supabase.from('messages').stream(primaryKey: ['id']);
 
     void updateRooms() async {
       if (controller.isClosed) return;
-
       final friendsData = await _supabase
           .from('friend_requests')
           .select()
           .or('sender_id.eq.${user.id},receiver_id.eq.${user.id}')
           .eq('status', 'accepted');
 
-      final List<ChatRoom> rooms = [];
-
-      // DMs from friends
       final List<String> friendIds = friendsData.map((item) {
         return item['sender_id'] == user.id
             ? item['receiver_id'] as String
@@ -112,19 +99,14 @@ class SupabaseChatRepository implements ChatRepository {
       }).toList();
 
       final roomIds = friendsData.map((item) => item['id'] as String).toList();
-
-      // Groups
       List<dynamic> groupsData = [];
       try {
-        final groupMemberships = await _supabase
+        final memberships = await _supabase
             .from('group_members')
             .select('room_id')
             .eq('user_id', user.id);
-
-        final groupRoomIds = (groupMemberships as List)
-            .map((m) => m['room_id'] as String)
-            .toList();
-
+        final groupRoomIds =
+            (memberships as List).map((m) => m['room_id'] as String).toList();
         if (groupRoomIds.isNotEmpty) {
           groupsData = await _supabase
               .from('chat_rooms')
@@ -139,7 +121,6 @@ class SupabaseChatRepository implements ChatRepository {
         return;
       }
 
-      // 1. BATCH FETCH UNREAD COUNTS
       final unreadMessages = await _supabase
           .from('messages')
           .select('room_id')
@@ -153,7 +134,6 @@ class SupabaseChatRepository implements ChatRepository {
         unreadCountsMap[rId] = (unreadCountsMap[rId] ?? 0) + 1;
       }
 
-      // 2. BULK FETCH PROFILES
       Map<String, dynamic> profilesMap = {};
       if (friendIds.isNotEmpty) {
         final profilesData = await _supabase
@@ -165,21 +145,18 @@ class SupabaseChatRepository implements ChatRepository {
         }
       }
 
-      // 3. PARALLEL FETCH LAST MESSAGES
       final friendFutures = friendsData.map((item) async {
         final friendId = item['sender_id'] == user.id
             ? item['receiver_id']
             : item['sender_id'];
         final profile = profilesMap[friendId];
-
         final lastMsgData = await _supabase
             .from('messages')
-            .select('id, content, created_at, status, user_id')
+            .select()
             .eq('room_id', item['id'])
             .order('created_at', ascending: false)
             .limit(1)
             .maybeSingle();
-
         return ChatRoom(
           id: item['id'],
           name: profile?['username'] ?? 'Unknown',
@@ -199,12 +176,11 @@ class SupabaseChatRepository implements ChatRepository {
       final groupFutures = groupsData.map((group) async {
         final lastMsgData = await _supabase
             .from('messages')
-            .select('id, content, created_at, status, user_id')
+            .select()
             .eq('room_id', group['id'])
             .order('created_at', ascending: false)
             .limit(1)
             .maybeSingle();
-
         return ChatRoom(
           id: group['id'],
           name: group['name'] ?? 'Unnamed Group',
@@ -220,33 +196,24 @@ class SupabaseChatRepository implements ChatRepository {
         );
       });
 
-      rooms.addAll(await Future.wait([...friendFutures, ...groupFutures]));
-
-      rooms.sort((a, b) {
-        final timeA = a.lastMessageTime ?? DateTime(2000);
-        final timeB = b.lastMessageTime ?? DateTime(2000);
-        return timeB.compareTo(timeA);
-      });
-
-      if (!controller.isClosed) {
-        controller.add(rooms);
-      }
+      final results = await Future.wait([...friendFutures, ...groupFutures]);
+      results.sort((a, b) => (b.lastMessageTime ?? DateTime(2000))
+          .compareTo(a.lastMessageTime ?? DateTime(2000)));
+      if (!controller.isClosed) controller.add(results);
     }
 
-    friendsSub = friendsStream.listen((_) => updateRooms());
-    messagesSub = messagesTrigger.listen((_) => updateRooms());
+    final friendsSub = friendsStream.listen((_) => updateRooms());
+    final messagesSub = messagesTrigger.listen((_) => updateRooms());
     final refreshSub = _refreshController.stream.listen((_) => updateRooms());
 
     controller.onCancel = () {
-      friendsSub?.cancel();
-      messagesSub?.cancel();
+      friendsSub.cancel();
+      messagesSub.cancel();
       refreshSub.cancel();
       controller.close();
     };
 
-    // Initial load
     updateRooms();
-
     return controller.stream;
   }
 
@@ -254,15 +221,12 @@ class SupabaseChatRepository implements ChatRepository {
   Future<void> markAsRead(String roomId) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-
-    // Update messages to 'read' if they are not already and were sent by someone else
     await _supabase
         .from('messages')
         .update({'status': 'read'})
         .eq('room_id', roomId)
         .neq('user_id', user.id)
         .neq('status', 'read');
-
     _refreshController.add(null);
   }
 
@@ -270,7 +234,6 @@ class SupabaseChatRepository implements ChatRepository {
   Future<void> markAsDelivered(String messageId) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-
     await _supabase
         .from('messages')
         .update({'status': 'delivered'})
@@ -284,7 +247,6 @@ class SupabaseChatRepository implements ChatRepository {
   Future<void> updateMessageReaction(String messageId, String? reaction) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-
     final response = await _supabase
         .from('messages')
         .select('reactions')
@@ -292,13 +254,11 @@ class SupabaseChatRepository implements ChatRepository {
         .single();
     final Map<String, dynamic> reactions =
         Map<String, dynamic>.from(response['reactions'] ?? {});
-
     if (reaction == null) {
       reactions.remove(user.id);
     } else {
       reactions[user.id] = reaction;
     }
-
     await _supabase
         .from('messages')
         .update({'reactions': reactions}).eq('id', messageId);
@@ -308,30 +268,21 @@ class SupabaseChatRepository implements ChatRepository {
   Future<void> setTypingStatus(String roomId, bool isTyping) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-
-    // Avoid redundant calls
     if (_typingCache[roomId] == isTyping) return;
     _typingCache[roomId] = isTyping;
-
     try {
       if (!_typingChannels.containsKey(roomId)) {
-        final channel = _supabase.channel('typing_$roomId');
-        channel.subscribe();
-        _typingChannels[roomId] = channel;
+        _typingChannels[roomId] = _supabase.channel('typing_$roomId')
+          ..subscribe();
       }
-
       final channel = _typingChannels[roomId]!;
       if (isTyping) {
-        await channel.track({
-          'user_id': user.id,
-          'typing': true,
-        });
+        await channel.track({'user_id': user.id, 'typing': true});
       } else {
         await channel.untrack();
       }
-    } catch (e) {
-      debugPrint('Error setting typing status: $e');
-      _typingCache.remove(roomId); // Reset cache on error
+    } catch (_) {
+      _typingCache.remove(roomId);
     }
   }
 
@@ -340,232 +291,160 @@ class SupabaseChatRepository implements ChatRepository {
     if (_typingControllers.containsKey(roomId)) {
       return _typingControllers[roomId]!.stream;
     }
-
     final controller = StreamController<String?>.broadcast();
     _typingControllers[roomId] = controller;
-
     final myId = _supabase.auth.currentUser?.id;
     final channel = _supabase.channel('typing_$roomId');
-
     channel.onPresenceSync((payload) {
-      final dynamic state = channel.presenceState();
-      String? typingUserId;
+      String? typingId;
+      final List presences = _extractPresenceList(channel.presenceState());
 
-      final presences = <dynamic>[];
-      if (state is Map) {
-        for (var v in state.values) {
-          if (v is List) presences.addAll(v);
-        }
-      } else if (state is List) {
-        presences.addAll(state);
-      }
-
-      for (final presence in presences) {
-        Map<String, dynamic>? pMap;
-        try {
-          if (presence is Map) {
-            pMap = Map<String, dynamic>.from(presence);
-          } else if (presence is Presence) {
-            pMap = presence.payload;
-          } else {
-            pMap = (presence as dynamic).payload as Map<String, dynamic>?;
-          }
-        } catch (_) {
-          try {
-            pMap = (presence as dynamic) as Map<String, dynamic>?;
-          } catch (_) {}
-        }
-
-        if (pMap != null && pMap['user_id'] != myId && pMap['typing'] == true) {
-          typingUserId = pMap['user_id'] as String?;
+      for (final v in presences) {
+        final d = _parsePresenceData(v);
+        if (d != null && d['user_id'] != myId && d['typing'] == true) {
+          typingId = d['user_id']?.toString();
           break;
         }
+        if (typingId != null) break;
       }
-
-      if (typingUserId != null) {
-        debugPrint('[Typing] Detected typing user: $typingUserId');
-      }
-
-      if (!controller.isClosed) {
-        controller.add(typingUserId);
-      }
+      if (!controller.isClosed) controller.add(typingId);
     });
-
     channel.subscribe();
-
-    // Trigger initial check
-    Timer.run(() {
-      if (!controller.isClosed) {
-        final dynamic state = channel.presenceState();
-        final presences = <dynamic>[];
-        if (state is Map) {
-          for (var v in state.values) {
-            if (v is List) presences.addAll(v);
-          }
-        } else if (state is List) {
-          presences.addAll(state);
-        }
-
-        String? typingId;
-        for (final p in presences) {
-          final data = _parsePresenceData(p);
-          if (data != null &&
-              data['user_id'] != myId &&
-              data['typing'] == true) {
-            typingId = data['user_id']?.toString();
-            break;
-          }
-        }
-        controller.add(typingId);
-      }
-    });
-
     controller.onCancel = () {
       _typingControllers.remove(roomId);
-      if (controller.hasListener == false) {
-        controller.close();
-      }
+      if (!controller.hasListener) controller.close();
     };
-
     return controller.stream;
   }
 
   @override
   Future<void> setOnlineStatus(bool isOnline) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return;
-
-    try {
-      if (_presenceChannel == null) {
-        _presenceChannel = _supabase.channel('global_presence');
-
-        final completer = Completer<void>();
-        _presenceChannel!.subscribe((status, [error]) {
-          debugPrint('Presence channel status: $status');
-          if (status == RealtimeSubscribeStatus.subscribed) {
-            if (!completer.isCompleted) completer.complete();
-          } else if (error != null) {
-            if (!completer.isCompleted) completer.completeError(error);
-          }
-        });
-
-        await completer.future
-            .timeout(
-              const Duration(seconds: 10),
-              onTimeout: () => debugPrint('Presence channel timeout'),
-            )
-            .catchError((e) => debugPrint('Presence subscription error: $e'));
-      }
-
+    final myId = _supabase.auth.currentUser?.id;
+    if (myId == null) {
+      debugPrint('[Presence] Cannot set online status - no user ID');
+      return;
+    }
+    debugPrint('[Presence] Setting online status to $isOnline for user $myId');
+    _ensureGlobalPresenceChannel();
+    if (_isGlobalPresenceSubscribed) {
       if (isOnline) {
-        await _presenceChannel!.track({
-          'user_id': user.id,
+        await _globalPresenceChannel!.track({
+          'user_id': myId,
           'online': true,
-          'last_seen': DateTime.now().toIso8601String(),
+          'last_seen': DateTime.now().toIso8601String()
         });
-        debugPrint('Online status set to true for user: ${user.id}');
+        debugPrint('[Presence] Tracked online status for $myId');
       } else {
-        await _presenceChannel!.untrack();
-        debugPrint('Online status set to false for user: ${user.id}');
+        await _globalPresenceChannel!.untrack();
+        debugPrint('[Presence] Untracked presence for $myId');
       }
-    } catch (e) {
-      debugPrint('Error setting online status: $e');
-      _presenceChannel = null;
+    } else {
+      debugPrint(
+          '[Presence] Channel not yet subscribed, status will be set after subscription');
     }
   }
 
   @override
   Stream<bool> watchUserOnlineStatus(String userId) {
+    debugPrint('[Presence] Starting to watch online status for user: $userId');
     if (_onlineControllers.containsKey(userId)) {
+      debugPrint('[Presence] Returning existing stream for $userId');
       return _onlineControllers[userId]!.stream;
     }
-
     final controller = StreamController<bool>.broadcast();
     _onlineControllers[userId] = controller;
+    _ensureGlobalPresenceChannel();
+    void update() {
+      if (controller.isClosed) return;
+      final dynamic state = _globalPresenceChannel?.presenceState();
+      if (state == null) {
+        debugPrint('[Presence] State is null for $userId');
+        return;
+      }
+      bool isOnline = false;
+      final List presences = _extractPresenceList(state);
+      debugPrint(
+          '[Presence] Checking ${presences.length} presences for user $userId');
 
-    if (_presenceChannel == null) {
-      _presenceChannel = _supabase.channel('global_presence');
-
-      _presenceChannel!.onPresenceSync((payload) {
-        final dynamic state = _presenceChannel!.presenceState();
-
-        final allPresences = <dynamic>[];
-        if (state is Map) {
-          for (var v in state.values) {
-            if (v is List) allPresences.addAll(v);
-          }
-        } else if (state is List) {
-          allPresences.addAll(state);
-        }
-
-        // Notify all active watchers
-        _onlineControllers.forEach((id, ctrl) {
-          bool isUserOnline = false;
-          for (final presence in allPresences) {
-            Map<String, dynamic>? data;
-            try {
-              if (presence is Map) {
-                data = Map<String, dynamic>.from(presence);
-              } else if (presence is Presence) {
-                data = presence.payload;
-              } else {
-                data = (presence as dynamic).payload as Map<String, dynamic>?;
-              }
-            } catch (_) {
-              try {
-                data = (presence as dynamic) as Map<String, dynamic>?;
-              } catch (_) {}
-            }
-
-            if (data != null &&
-                data['user_id']?.toString() == id &&
-                data['online'] == true) {
-              isUserOnline = true;
-              break;
-            }
-          }
-          if (!ctrl.isClosed) ctrl.add(isUserOnline);
-        });
-      });
-
-      _presenceChannel!.subscribe();
-    }
-
-    // Initial check for this user
-    Timer.run(() {
-      if (!controller.isClosed) {
-        final dynamic state = _presenceChannel!.presenceState();
-        final allPresences = <dynamic>[];
-        if (state is Map) {
-          for (var v in state.values) {
-            if (v is List) allPresences.addAll(v);
-          }
-        } else if (state is List) {
-          allPresences.addAll(state);
-        }
-
-        bool isOnline = false;
-        for (final p in allPresences) {
-          final data = _parsePresenceData(p);
-          if (data != null &&
-              data['user_id']?.toString() == userId &&
-              data['online'] == true) {
+      for (final v in presences) {
+        debugPrint('[Presence] Raw presence item: $v (type: ${v.runtimeType})');
+        final d = _parsePresenceData(v);
+        if (d != null) {
+          debugPrint('[Presence] Parsed presence data: $d');
+          debugPrint(
+              '[Presence] Found presence data: user_id=${d['user_id']}, online=${d['online']}');
+          if (d['user_id']?.toString() == userId && d['online'] == true) {
             isOnline = true;
             break;
           }
+        } else {
+          debugPrint('[Presence] Failed to parse presence data from: $v');
         }
-        controller.add(isOnline);
+        if (isOnline) break;
       }
+      debugPrint('[Presence] User $userId online status: $isOnline');
+      if (!controller.isClosed) controller.add(isOnline);
+    }
+
+    // Notify immediately on sync
+    _globalPresenceChannel!.onPresenceSync((payload) {
+      debugPrint('[Presence] Presence sync triggered for $userId');
+      update();
     });
 
+    // Trigger initial check after a short delay to allow subscription to settle
+    Timer(const Duration(milliseconds: 500), update);
     controller.onCancel = () {
       _onlineControllers.remove(userId);
-      if (controller.hasListener == false) {
-        controller.close();
-      }
+      if (!controller.hasListener) controller.close();
     };
-
     return controller.stream;
+  }
+
+  void _ensureGlobalPresenceChannel() {
+    if (_globalPresenceChannel != null) {
+      if (!_isGlobalPresenceSubscribed) {
+        debugPrint(
+            '[Presence] Subscribing to existing global presence channel');
+        _globalPresenceChannel!.subscribe();
+      }
+      return;
+    }
+    debugPrint('[Presence] Creating new global presence channel');
+    _globalPresenceChannel = _supabase.channel('global_presence',
+        opts: const RealtimeChannelConfig(self: true));
+    _globalPresenceChannel!.onPresenceSync((payload) {
+      debugPrint('[Presence] Global presence sync event received');
+      for (var entry in _onlineControllers.entries) {
+        final userId = entry.key;
+        final controller = entry.value;
+        bool isOnline = false;
+        final List presences =
+            _extractPresenceList(_globalPresenceChannel!.presenceState());
+        debugPrint(
+            '[Presence] Syncing ${presences.length} presences for tracked user $userId');
+
+        for (final v in presences) {
+          final d = _parsePresenceData(v);
+          if (d != null &&
+              d['user_id']?.toString() == userId &&
+              d['online'] == true) {
+            isOnline = true;
+            break;
+          }
+          if (isOnline) break;
+        }
+        if (!controller.isClosed) controller.add(isOnline);
+      }
+    });
+    _globalPresenceChannel!.subscribe((status, [error]) {
+      debugPrint('[Presence] Subscription status: $status, error: $error');
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        _isGlobalPresenceSubscribed = true;
+        debugPrint('[Presence] Successfully subscribed to global presence');
+        setOnlineStatus(true);
+      }
+    });
   }
 
   @override
@@ -573,57 +452,31 @@ class SupabaseChatRepository implements ChatRepository {
     if (_groupPresenceControllers.containsKey(roomId)) {
       return _groupPresenceControllers[roomId]!.stream;
     }
-
     final controller = StreamController<int>.broadcast();
     _groupPresenceControllers[roomId] = controller;
-
     final channel = _supabase.channel('group_presence_$roomId');
-
     channel.onPresenceSync((payload) {
-      final dynamic state = channel.presenceState();
       int count = 0;
+      final List presences = _extractPresenceList(channel.presenceState());
 
-      final presences = <dynamic>[];
-      if (state is Map) {
-        for (var v in state.values) {
-          if (v is List) presences.addAll(v);
-        }
-      } else if (state is List) {
-        presences.addAll(state);
-      }
-
-      for (final presence in presences) {
-        Map<String, dynamic>? data;
-        try {
-          if (presence is Map) {
-            data = Map<String, dynamic>.from(presence);
-          } else {
-            data = (presence as dynamic).payload as Map<String, dynamic>?;
-          }
-        } catch (_) {}
-
-        if (data != null && data['online'] == true) {
+      for (final v in presences) {
+        final d = _parsePresenceData(v);
+        if (d != null && d['online'] == true) {
           count++;
         }
       }
-
       if (!controller.isClosed) controller.add(count);
     });
-
     final user = _supabase.auth.currentUser;
     channel.subscribe((status, [error]) {
       if (status == RealtimeSubscribeStatus.subscribed && user != null) {
         channel.track({'user_id': user.id, 'online': true});
       }
     });
-
     controller.onCancel = () {
       _groupPresenceControllers.remove(roomId);
-      if (controller.hasListener == false) {
-        controller.close();
-      }
+      if (!controller.hasListener) controller.close();
     };
-
     return controller.stream;
   }
 
@@ -631,7 +484,6 @@ class SupabaseChatRepository implements ChatRepository {
   Stream<List<FriendRequest>> getFriendRequests() {
     final myId = _supabase.auth.currentUser?.id;
     if (myId == null) return Stream.value([]);
-
     return _supabase
         .from('friend_requests')
         .stream(primaryKey: ['id'])
@@ -643,83 +495,57 @@ class SupabaseChatRepository implements ChatRepository {
         .asyncMap((data) async {
           final List<FriendRequest> requests = [];
           for (var item in data) {
-            final senderId = item['sender_id'];
             final profile = await _supabase
                 .from('profiles')
                 .select()
-                .eq('id', senderId)
+                .eq('id', item['sender_id'])
                 .maybeSingle();
             requests.add(FriendRequest(
-              id: item['id'],
-              senderId: senderId,
-              senderName: profile?['username'] ?? 'Unknown',
-              senderAvatar: profile?['avatar_url'],
-              timestamp: DateTime.parse(item['created_at']),
-            ));
+                id: item['id'],
+                senderId: item['sender_id'],
+                senderName: profile?['username'] ?? 'Unknown',
+                senderAvatar: profile?['avatar_url'],
+                timestamp: DateTime.parse(item['created_at'])));
           }
           return requests;
         });
   }
 
   @override
-  Future<void> acceptFriendRequest(String requestId) async {
-    try {
-      await _supabase
-          .from('friend_requests')
-          .update({'status': 'accepted'}).eq('id', requestId);
-    } catch (e) {
-      rethrow;
-    }
-  }
-
+  Future<void> acceptFriendRequest(String requestId) async => await _supabase
+      .from('friend_requests')
+      .update({'status': 'accepted'}).eq('id', requestId);
   @override
-  Future<void> rejectFriendRequest(String requestId) async {
-    try {
-      await _supabase
-          .from('friend_requests')
-          .update({'status': 'rejected'}).eq('id', requestId);
-    } catch (e) {
-      rethrow;
-    }
-  }
-
+  Future<void> rejectFriendRequest(String requestId) async => await _supabase
+      .from('friend_requests')
+      .update({'status': 'rejected'}).eq('id', requestId);
   @override
   Future<void> sendFriendRequest(String receiverId) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-
-    // Check if request already exists
     final existing = await _supabase
         .from('friend_requests')
         .select()
         .or('and(sender_id.eq.${user.id},receiver_id.eq.$receiverId),and(sender_id.eq.$receiverId,receiver_id.eq.${user.id})')
         .maybeSingle();
-
     if (existing != null) {
-      // If it was rejected, we can update it to pending again
       if (existing['status'] == 'rejected') {
         await _supabase.from('friend_requests').update({
           'status': 'pending',
           'sender_id': user.id,
-          'receiver_id': receiverId,
+          'receiver_id': receiverId
         }).eq('id', existing['id']);
       }
       return;
     }
-
-    await _supabase.from('friend_requests').insert({
-      'sender_id': user.id,
-      'receiver_id': receiverId,
-      'status': 'pending',
-    });
+    await _supabase.from('friend_requests').insert(
+        {'sender_id': user.id, 'receiver_id': receiverId, 'status': 'pending'});
   }
 
   @override
   Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     if (query.isEmpty) return [];
-
     final user = _supabase.auth.currentUser;
-    // Search for users, but filter out current user
     final response = await _supabase
         .from('profiles')
         .select('id, username, avatar_url')
@@ -727,11 +553,8 @@ class SupabaseChatRepository implements ChatRepository {
         .eq('is_public', true)
         .neq('id', user?.id ?? '')
         .limit(20);
-
     final results = List<Map<String, dynamic>>.from(response);
-
     if (user != null && results.isNotEmpty) {
-      // Get all friend requests involving the current user and these search results
       final userIds = results.map((u) => u['id']).toList();
       final requests = await _supabase
           .from('friend_requests')
@@ -739,27 +562,20 @@ class SupabaseChatRepository implements ChatRepository {
           .or('sender_id.eq.${user.id},receiver_id.eq.${user.id}')
           .inFilter('sender_id', userIds.followedBy([user.id]).toList())
           .inFilter('receiver_id', userIds.followedBy([user.id]).toList());
-
       for (var result in results) {
-        final request =
-            (requests as List).cast<Map<String, dynamic>?>().firstWhere(
-                  (r) =>
-                      r != null &&
-                      ((r['sender_id'] == user.id &&
-                              r['receiver_id'] == result['id']) ||
-                          (r['receiver_id'] == user.id &&
-                              r['sender_id'] == result['id'])),
-                  orElse: () => null,
-                );
-
-        if (request != null) {
-          result['friendship_status'] = request['status'];
-        } else {
-          result['friendship_status'] = 'none';
-        }
+        final request = (requests as List)
+            .cast<Map<String, dynamic>?>()
+            .firstWhere(
+                (r) =>
+                    r != null &&
+                    ((r['sender_id'] == user.id &&
+                            r['receiver_id'] == result['id']) ||
+                        (r['receiver_id'] == user.id &&
+                            r['sender_id'] == result['id'])),
+                orElse: () => null);
+        result['friendship_status'] = request?['status'] ?? 'none';
       }
     }
-
     return results;
   }
 
@@ -767,49 +583,37 @@ class SupabaseChatRepository implements ChatRepository {
   Future<List<Map<String, dynamic>>> getContacts() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return [];
-
     final response = await _supabase
         .from('friend_requests')
-        .select('sender_id, receiver_id, status')
+        .select('sender_id, receiver_id')
         .or('sender_id.eq.${user.id},receiver_id.eq.${user.id}')
         .eq('status', 'accepted');
-
-    final List<String> friendIds = [];
-    for (var item in response) {
-      if (item['sender_id'] == user.id) {
-        friendIds.add(item['receiver_id']);
-      } else {
-        friendIds.add(item['sender_id']);
-      }
-    }
-
-    if (friendIds.isEmpty) return [];
-
+    final ids = response
+        .map((i) =>
+            i['sender_id'] == user.id ? i['receiver_id'] : i['sender_id'])
+        .toList();
+    if (ids.isEmpty) return [];
     final profiles = await _supabase
         .from('profiles')
         .select('id, username, avatar_url')
-        .inFilter('id', friendIds);
-
+        .inFilter('id', ids);
     return (profiles as List)
         .map((p) => {
               'id': p['id'],
               'username': p['username'],
-              'avatar_url': p['avatar_url'],
+              'avatar_url': p['avatar_url']
             })
         .toList();
   }
 
   @override
-  Future<ChatRoom> createGroup({
-    required String name,
-    required List<String> memberIds,
-    String? bio,
-    String? avatarUrl,
-  }) async {
+  Future<ChatRoom> createGroup(
+      {required String name,
+      required List<String> memberIds,
+      String? bio,
+      String? avatarUrl}) async {
     final user = _supabase.auth.currentUser;
-    if (user == null) throw Exception('User not logged in');
-
-    // Create a real record in chat_rooms table
+    if (user == null) throw Exception('No user');
     final room = await _supabase
         .from('chat_rooms')
         .insert({
@@ -818,25 +622,24 @@ class SupabaseChatRepository implements ChatRepository {
           'avatar_url': avatarUrl,
           'last_message': 'Group created',
           'is_group': true,
-          'admin_id': user.id,
+          'admin_id': user.id
         })
         .select()
         .single();
-
-    // Add members to the group (creator is auto-added by trigger as admin)
-    if (memberIds.isNotEmpty) {
-      final memberInserts = memberIds
-          .map((memberId) => {
-                'room_id': room['id'],
-                'user_id': memberId,
-                'role': 'member',
-              })
-          .toList();
-
-      await _supabase.from('group_members').insert(memberInserts);
-    }
-
-    return ChatRoom.fromJson(room);
+    final members = memberIds
+        .map((id) => {'room_id': room['id'], 'user_id': id, 'role': 'member'})
+        .toList();
+    members.add({'room_id': room['id'], 'user_id': user.id, 'role': 'admin'});
+    await _supabase.from('group_members').insert(members);
+    _refreshController.add(null);
+    return ChatRoom(
+        id: room['id'],
+        name: room['name'],
+        avatarUrl: room['avatar_url'],
+        lastMessage: 'Group created',
+        unreadCount: 0,
+        isGroup: true,
+        lastMessageTime: DateTime.parse(room['created_at']));
   }
 
   @override
@@ -845,170 +648,217 @@ class SupabaseChatRepository implements ChatRepository {
     await _supabase.from('chat_rooms').update({
       if (name != null) 'name': name,
       if (bio != null) 'bio': bio,
-      if (avatarUrl != null) 'avatar_url': avatarUrl,
+      if (avatarUrl != null) 'avatar_url': avatarUrl
     }).eq('id', roomId);
-  }
-
-  @override
-  Future<void> removeMember(String roomId, String userId) async {
-    await _supabase
-        .from('group_members')
-        .delete()
-        .eq('room_id', roomId)
-        .eq('user_id', userId);
+    _refreshController.add(null);
   }
 
   @override
   Future<void> blockUser(String userId) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return;
-    await _supabase.from('blocked_users').upsert({
-      'blocker_id': user.id,
-      'blocked_id': userId,
-    }, onConflict: 'blocker_id, blocked_id');
-  }
-
-  @override
-  Future<bool> isUserBlocked(String userId) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return false;
-
-    final response = await _supabase
+    final myId = _supabase.auth.currentUser?.id;
+    if (myId == null) return;
+    await _supabase
         .from('blocked_users')
-        .select()
-        .eq('blocker_id', user.id)
-        .eq('blocked_id', userId)
-        .maybeSingle();
-
-    return response != null;
-  }
-
-  @override
-  Future<bool> amIBlockedBy(String userId) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return false;
-
-    final response = await _supabase
-        .from('blocked_users')
-        .select()
-        .eq('blocker_id', userId)
-        .eq('blocked_id', user.id)
-        .maybeSingle();
-
-    return response != null;
+        .insert({'blocker_id': myId, 'blocked_id': userId});
   }
 
   @override
   Future<void> unblockUser(String userId) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return;
+    final myId = _supabase.auth.currentUser?.id;
+    if (myId == null) return;
     await _supabase
         .from('blocked_users')
         .delete()
-        .eq('blocker_id', user.id)
+        .eq('blocker_id', myId)
         .eq('blocked_id', userId);
   }
 
   @override
-  Future<List<Map<String, dynamic>>> getBlockedUsers() async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return [];
-
-    final data = await _supabase
+  Future<bool> isUserBlocked(String userId) async {
+    final myId = _supabase.auth.currentUser?.id;
+    if (myId == null) return false;
+    final res = await _supabase
         .from('blocked_users')
-        .select(
-            'blocked_id, profiles!blocked_users_blocked_id_fkey(username, avatar_url)')
-        .eq('blocker_id', user.id);
+        .select()
+        .eq('blocker_id', myId)
+        .eq('blocked_id', userId)
+        .maybeSingle();
+    return res != null;
+  }
 
-    return (data as List).map((item) {
-      final profile = item['profiles'] as Map<String, dynamic>;
-      return {
-        'id': item['blocked_id'],
-        'username': profile['username'],
-        'avatar_url': profile['avatar_url'],
-      };
-    }).toList();
+  @override
+  Future<bool> amIBlockedBy(String userId) async {
+    final myId = _supabase.auth.currentUser?.id;
+    if (myId == null) return false;
+    final res = await _supabase
+        .from('blocked_users')
+        .select()
+        .eq('blocker_id', userId)
+        .eq('blocked_id', myId)
+        .maybeSingle();
+    return res != null;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getBlockedUsers() async {
+    final myId = _supabase.auth.currentUser?.id;
+    if (myId == null) return [];
+    final res = await _supabase
+        .from('blocked_users')
+        .select('blocked_id, profiles(username, avatar_url)')
+        .eq('blocker_id', myId);
+    return (res as List)
+        .map((i) => {
+              'id': i['blocked_id'],
+              'username': i['profiles']['username'],
+              'avatar_url': i['profiles']['avatar_url']
+            })
+        .toList();
   }
 
   @override
   Future<void> deleteAccount() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
-
-    final userId = user.id;
-
-    // 1. Clean up Storage Buckets
-    final buckets = [
-      'avatars',
-      'vibe-media',
-      'chat-media',
-      'chat-documents',
-      'chat-audio',
-      'group_avatars'
-    ];
-
-    for (final bucket in buckets) {
-      try {
-        // List all files in the user's folder
-        final files = await _supabase.storage.from(bucket).list(path: userId);
-        if (files.isNotEmpty) {
-          final pathsToDelete =
-              files.map((file) => '$userId/${file.name}').toList();
-          await _supabase.storage.from(bucket).remove(pathsToDelete);
-        }
-      } catch (e) {
-        debugPrint('Error cleaning up bucket $bucket: $e');
-      }
-    }
-
-    // 2. Delete data from tables (most should be handled by CASCADE, but for safety)
-    try {
-      // Delete statuses/vibes
-      await _supabase.from('statuses').delete().eq('user_id', userId);
-      // Delete friend requests
-      await _supabase
-          .from('friend_requests')
-          .delete()
-          .or('sender_id.eq.$userId,receiver_id.eq.$userId');
-      // Delete messages
-      await _supabase.from('messages').delete().eq('user_id', userId);
-    } catch (e) {
-      debugPrint('Error cleaning up tables: $e');
-    }
-
-    // 3. Call RPC function to delete auth record (which should delete profile via trigger/cascade)
-    try {
-      await _supabase.rpc('delete_user');
-      await _supabase.auth.signOut();
-    } catch (e) {
-      // Fallback: delete profile if RPC fails or is missing
-      try {
-        await _supabase.from('profiles').delete().eq('id', userId);
-      } catch (_) {}
-      await _supabase.auth.signOut();
-    }
+    await _supabase.from('profiles').delete().eq('id', user.id);
+    await _supabase.auth.signOut();
   }
 
   @override
-  Future<Map<String, dynamic>?> getProfile(String userId) async {
-    return await _supabase
-        .from('profiles')
-        .select()
-        .eq('id', userId)
-        .maybeSingle();
+  Future<void> removeMember(String roomId, String userId) async =>
+      await _supabase
+          .from('group_members')
+          .delete()
+          .eq('room_id', roomId)
+          .eq('user_id', userId);
+
+  @override
+  Future<Map<String, dynamic>?> getProfile(String userId) async =>
+      await _supabase.from('profiles').select().eq('id', userId).maybeSingle();
+
+  // Helper to extract presence list from various return types
+  List _extractPresenceList(dynamic state) {
+    if (state == null) {
+      debugPrint('[Presence] State is null in _extractPresenceList');
+      return [];
+    }
+
+    try {
+      final List allPresences = [];
+
+      // On Web, presenceState() might return a List directly
+      if (state is List) {
+        debugPrint('[Presence] State is List with ${state.length} items');
+        // Each item in the list is a PresenceState object
+        for (final item in state) {
+          try {
+            // Try to access the 'presences' property
+            final dynamic presences = (item as dynamic).presences;
+            if (presences is List) {
+              allPresences.addAll(presences);
+            } else if (presences != null) {
+              allPresences.add(presences);
+            }
+          } catch (e) {
+            debugPrint('[Presence] Could not extract presences from item: $e');
+            // Fallback: treat the item itself as a presence
+            allPresences.add(item);
+          }
+        }
+        return allPresences;
+      }
+
+      // On native platforms, it returns a Map
+      if (state is Map) {
+        final values = state.values.toList();
+        debugPrint('[Presence] State is Map with ${values.length} values');
+        for (final item in values) {
+          try {
+            final dynamic presences = (item as dynamic).presences;
+            if (presences is List) {
+              allPresences.addAll(presences);
+            } else if (presences != null) {
+              allPresences.add(presences);
+            }
+          } catch (e) {
+            allPresences.add(item);
+          }
+        }
+        return allPresences;
+      }
+
+      // Try to convert as Iterable
+      if (state is Iterable) {
+        final list = state.toList();
+        debugPrint('[Presence] State is Iterable with ${list.length} items');
+        for (final item in list) {
+          try {
+            final dynamic presences = (item as dynamic).presences;
+            if (presences is List) {
+              allPresences.addAll(presences);
+            } else if (presences != null) {
+              allPresences.add(presences);
+            }
+          } catch (e) {
+            allPresences.add(item);
+          }
+        }
+        return allPresences;
+      }
+
+      debugPrint(
+          '[Presence] Could not extract list from state type: ${state.runtimeType}');
+      return [];
+    } catch (e) {
+      debugPrint('[Presence] Error in _extractPresenceList: $e');
+      return [];
+    }
   }
 
-  Map<String, dynamic>? _parsePresenceData(dynamic presence) {
+  // Helper
+  Map<String, dynamic>? _parsePresenceData(dynamic p) {
+    if (p == null) return null;
     try {
-      if (presence is Map) return Map<String, dynamic>.from(presence);
-      if (presence is Presence) return presence.payload;
-      return (presence as dynamic).payload as Map<String, dynamic>?;
-    } catch (_) {
+      if (p is Map) {
+        return Map<String, dynamic>.from(p);
+      }
+
+      // Handle Supabase Presence object safely
+      dynamic payload;
       try {
-        return (presence as dynamic) as Map<String, dynamic>?;
+        payload = (p as dynamic).payload;
+      } catch (_) {
+        payload = p;
+      }
+
+      if (payload == null) return null;
+
+      if (payload is Map) {
+        return Map<String, dynamic>.from(payload);
+      }
+
+      // On Web, JSObject might not match 'Map' but can be converted
+      try {
+        return Map<String, dynamic>.from(payload as dynamic);
       } catch (_) {
         return null;
       }
+    } catch (_) {
+      return null;
     }
+  }
+
+  // Not in interface but used internally
+  Future<void> uploadFcmToken(String token) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+    await _supabase
+        .from('profiles')
+        .update({'fcm_token': token}).eq('id', user.id);
+  }
+
+  Future<void> deleteMessage(String messageId) async {
+    await _supabase.from('messages').delete().eq('id', messageId);
+    _refreshController.add(null);
   }
 }

@@ -62,7 +62,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   ),
                 ),
               ),
-            ).animate().fadeIn().slideX(begin: 0.5),
+            )
+                .animate(key: const ValueKey('pip_anim'))
+                .fadeIn()
+                .slideX(begin: 0.5),
 
           // Header (Name & Status)
           if (_showControls)
@@ -103,7 +106,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                   ),
                 ],
               ),
-            ).animate().fadeIn().slideY(begin: -0.5),
+            )
+                .animate(key: const ValueKey('header_anim'))
+                .fadeIn()
+                .slideY(begin: -0.5),
 
           // Bottom Controls
           if (_showControls)
@@ -153,7 +159,10 @@ class _ActiveCallScreenState extends State<ActiveCallScreen> {
                     ),
                   ),
                 ),
-              ).animate().fadeIn().slideY(begin: 0.5),
+              )
+                  .animate(key: const ValueKey('controls_anim'))
+                  .fadeIn()
+                  .slideY(begin: 0.5),
             ),
         ],
       ),
